@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Passport {{ passport.owner | short }}{% endblock %}
+
+{% block content %}
+<header style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:24px">
+  <div>
+    <div class="label">Reputation passport</div>
+    <h1 class="mono" style="font-size:20px">{{ passport.owner | short(8, 8) }}</h1>
+  </div>
+  {{ m.tier_pill(passport.tier, passport.tierName) }}
+</header>
+
+<div class="grid cols-4" style="margin-bottom:24px">
+  <div class="card">{{ m.stat('Score', '{:,}'.format(score), 'milli-SOL-days held to maturity', 'tier') }}</div>
+  <div class="card">{{ m.stat('Held to maturity', passport.tokensHeldToMaturity, 'tokens') }}</div>
+  <div class="card">{{ m.stat('Average hold', passport.averageHoldSeconds | duration,
+                              passport.activePositions ~ ' active position' ~ ('' if passport.activePositions == 1 else 's')) }}</div>
+  <div class="card">{{ m.stat('Capital at risk', passport.capitalAtRiskLamports | sol,
+                              'cost basis still in the market', 'stack') }}</div>
+</div>
+
+<section class="card" style="margin-bottom:16px">
+  <div style="display:flex; justify-content:space-between; align-items:baseline">
+    <h2 style="margin:0">Progress to the next tier</h2>
+    <span class="tiny mono dim">
+      {% if passport.nextTierAt %}{{ '{:,}'.format(score) }} / {{ '{:,}'.format(passport.nextTierAt | int) }}
+      {% else %}top tier reached{% endif %}
+    </span>
+  </div>
+  <div style="margin-top:12px">{{ m.bar(tier_progress_bps, 'tier') }}</div>
+  <div class="grid cols-4" style="margin-top:12px; grid-template-columns: repeat(5, minmax(0,1fr))">
+    {% for rung in ladder %}
+    <div style="border-radius:8px; padding:8px 12px; border:1px solid {{ 'rgba(251,191,36,.4)' if passport.tier >= rung.tier else 'var(--ink-700)' }}; background: {{ 'rgba(251,191,36,.05)' if passport.tier >= rung.tier else 'transparent' }}">
+      <div class="small" style="color: {{ 'var(--tier)' if passport.tier >= rung.tier else 'var(--text-dim)' }}">{{ rung.name }}</div>
+      <div class="tiny mono dim">{{ '{:,}'.format(rung.at) }}+</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card" style="margin-bottom:24px">
+  <h2>What tier {{ passport.tier }} unlocks</h2>
+  <ul style="margin:0; padding-left:0; list-style:none" class="small dim">
+    {% for perk in passport.perks %}
+    <li style="display:flex; gap:8px"><span style="color:var(--stack)">✓</span>{{ perk }}</li>
+    {% endfor %}
+  </ul>
+  <hr>
+  <p class="hint" style="margin:0">
+    Reputation is platform-wide, non-transferable, and earned as
+    <span style="color:#e2e8f0">capital at risk × time held</span> — linear in capital and
+    counting no wallets. Splitting a position across wallets leaves total score unchanged while
+    lowering every wallet's tier, so it is a pure loss.
+  </p>
+</section>
+
+<h2 class="label" style="margin-bottom:12px">Positions</h2>
+{% if not passport.positions %}
+  <div class="card" style="text-align:center">
+    <div class="small">No positions</div>
+    <p class="hint">This wallet has not bought into any launch yet.</p>
+  </div>
+{% endif %}
+
+<div class="grid cols-2">
+  {% for p in passport.positions %}
+  <a class="card" href="/token/{{ p.mint }}">
+    <div style="display:flex; justify-content:space-between; align-items:baseline">
+      <span class="mono" style="color:var(--stack); font-size:13px">{{ p.mint | short(6, 4) }}</span>
+      <span class="tiny dim">held {{ p.averageHoldSeconds | duration }}</span>
+    </div>
+    <div class="grid cols-3" style="margin:12px 0">
+      {{ m.stat('Holding', p.totalRemaining | tokens) }}
+      {{ m.stat('Unlocked', p.unlockProgressBps | bps, none, 'stack') }}
+      {{ m.stat('Claimable', p.projectedClaimable | tokens, none, 'pool') }}
+    </div>
+    {{ m.bar(p.unlockProgressBps) }}
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

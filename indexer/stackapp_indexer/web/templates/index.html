@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Launches{% endblock %}
+
+{% block content %}
+<section style="margin-bottom:32px">
+  <h1>Holding longer is the whole mechanism</h1>
+  <p class="dim" style="max-width:62ch">
+    Every exit is taxed on a curve that decays with how long <em>those particular tokens</em>
+    were held — tracked as FIFO lots, so topping up cannot hide fresh capital behind an old
+    position. The tax funds a loyalty pool paid out by tenure-weighted share. Moving tokens to
+    another wallet is taxed exactly like selling them, so splitting a position across wallets
+    buys you nothing.
+  </p>
+  <div class="row" style="margin-top:12px">
+    <a class="btn btn-primary" href="/launch">Launch a token</a>
+    <a class="btn btn-ghost" href="/feed">Watch the live feed</a>
+  </div>
+</section>
+
+<h2 class="label" style="margin-bottom:12px">Live launches</h2>
+
+{% if not tokens %}
+  <div class="card" style="text-align:center">
+    <div>No launches yet.</div>
+    <p class="hint">
+      Create one on the <a href="/launch">launch page</a>, or restart the indexer with
+      <code>--mock</code> to see sample data.
+    </p>
+  </div>
+{% endif %}
+
+<div class="grid cols-3">
+  {% for t in tokens %}
+  <a class="card" href="/token/{{ t.mint }}">
+    <div style="display:flex; justify-content:space-between; align-items:baseline">
+      <span class="mono" style="color:var(--stack); font-size:13px">{{ t.mint | short(6, 4) }}</span>
+      <span class="tiny dim">{{ t.ageSeconds | duration }} old</span>
+    </div>
+
+    <div style="margin:16px 0">{{ m.tax_chart(t.chart) }}</div>
+
+    <div class="grid cols-2">
+      {{ m.stat('Price', t.curve.spotPriceLamports | price) }}
+      {{ m.stat('Holders', t.holderCount) }}
+      {{ m.stat('Pool', t.pool.outstanding | tokens(t.decimals), 'claimable by holders', 'pool') }}
+      {{ m.stat('Opening tax', t.currentOpeningTaxBps | bps,
+                'vest ' ~ (t.vestDurationSeconds | duration), 'tax') }}
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

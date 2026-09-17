@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-ink-950 text-slate-200 antialiased;
+  background-image:
+    radial-gradient(60rem 40rem at 20% -10%, rgba(74, 222, 128, 0.07), transparent),
+    radial-gradient(50rem 30rem at 90% 0%, rgba(96, 165, 250, 0.06), transparent);
+  background-attachment: fixed;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-ink-700 bg-ink-900/70 p-5 backdrop-blur;
+  }
+
+  .label {
+    @apply text-xs uppercase tracking-wider text-slate-500;
+  }
+
+  .stat {
+    @apply font-mono text-lg text-slate-100;
+  }
+
+  .btn {
+    @apply rounded-lg px-4 py-2 text-sm font-medium transition
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn bg-stack text-ink-950 hover:bg-emerald-300;
+  }
+
+  .btn-ghost {
+    @apply btn border border-ink-600 text-slate-300 hover:border-ink-500 hover:text-white;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 font-mono text-sm
+           text-slate-100 outline-none focus:border-stack;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
+  }
+}
+
+/* The wallet-adapter modal ships its own styles; nudge them to match. */
+.wallet-adapter-button-trigger {
+  background-color: #4ade80 !important;
+  color: #07090d !important;
+  border-radius: 0.5rem !important;
+  height: 2.25rem !important;
+  font-size: 0.875rem !important;
+}

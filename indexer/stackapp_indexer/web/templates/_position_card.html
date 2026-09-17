@@ -1,0 +1,42 @@
+{% import "_macros.html" as m %}
+
+<div class="grid cols-4">
+  {{ m.stat('Holding', p.totalRemaining | tokens(decimals)) }}
+  {{ m.stat('Unlocked', p.spendable | tokens(decimals),
+            (p.totalLocked | tokens(decimals)) ~ ' still locked', 'stack') }}
+  {{ m.stat('Pool share', '%.2f' % (p.poolSharePpm / 10000) ~ '%',
+            'weight ' ~ '{:,}'.format(p.weightedShares), 'pool') }}
+  {{ m.stat('Claimable', p.projectedClaimable | tokens(decimals),
+            'eligible now' if p.claimEligible else 'waiting out the claim delay', 'pool') }}
+</div>
+
+<div style="margin-top:16px">
+  <div style="display:flex; justify-content:space-between" class="tiny dim">
+    <span>Unlock progress</span><span class="mono">{{ p.unlockProgressBps | bps }}</span>
+  </div>
+  <div style="margin-top:4px">{{ m.bar(p.unlockProgressBps) }}</div>
+</div>
+
+{% if p.lots %}
+<table style="margin-top:16px">
+  <thead><tr>
+    <th>Lot age</th>
+    <th class="num">Remaining</th>
+    <th class="num">Unlocked</th>
+    <th class="num">Sell tax now</th>
+    <th class="num">Tenure ×</th>
+  </tr></thead>
+  <tbody>
+  {% for lot in p.lots %}
+    <tr>
+      <td>{{ lot.ageSeconds | duration }}</td>
+      <td class="num">{{ lot.remaining | tokens(decimals) }}</td>
+      <td class="num">{{ lot.vestedBps | bps }}</td>
+      <td class="num" style="color:var(--tax)">{{ lot.currentTaxBps | bps }}</td>
+      <td class="num" style="color:var(--stack)">{{ '%.2f' % (lot.tenureMultiplierBps / 10000) }}×</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="hint">Oldest lot sells first. Each lot is taxed at its own rate.</p>
+{% endif %}

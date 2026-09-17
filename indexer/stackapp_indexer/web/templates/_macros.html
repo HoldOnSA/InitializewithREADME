@@ -1,0 +1,60 @@
+{# Shared fragments. Anything needing real arithmetic is computed in
+   web/format.py and passed in - templates stay declarative. #}
+
+{% macro stat(label, value, hint=None, tone='') %}
+<div>
+  <div class="label">{{ label }}</div>
+  <div class="stat {{ tone }}">{{ value }}</div>
+  {% if hint %}<div class="hint">{{ hint }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro bar(bps_value, tone='') %}
+<div class="bar {{ tone }}"><span style="width: {{ bps_value | pct }}"></span></div>
+{% endmacro %}
+
+{# `chart` comes from format.tax_curve_chart(points). #}
+{% macro tax_chart(chart) %}
+{% if chart %}
+<svg viewBox="0 0 320 96" style="width:100%" role="img" aria-label="Sell tax against time held">
+  <defs>
+    <linearGradient id="taxfill-{{ chart.id }}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fb7185" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#fb7185" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path d="{{ chart.fill }}" fill="url(#taxfill-{{ chart.id }})"/>
+  <path d="{{ chart.line }}" fill="none" stroke="#fb7185" stroke-width="1.75"/>
+</svg>
+<div class="ticks">
+  <span>0</span><span>{{ chart.mid_label }}</span><span>{{ chart.end_label }}+</span>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro tax_table(points) %}
+<table>
+  <thead><tr><th>Held for</th><th class="num">Sell tax</th></tr></thead>
+  <tbody>
+  {% for p in points %}
+    <tr>
+      <td>{{ 'immediately' if p.secondsHeld == 0 else p.secondsHeld | duration }}</td>
+      <td class="num" style="color:var(--tax)">{{ p.taxBps | bps }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% macro wallet_link(key) %}
+{%- if key -%}<a href="/passport/{{ key }}" class="mono">{{ key | short }}</a>
+{%- else -%}<span class="dim">-</span>{%- endif -%}
+{% endmacro %}
+
+{% macro mint_link(key) %}
+<a href="/token/{{ key }}" class="mono">{{ key | short }}</a>
+{% endmacro %}
+
+{% macro tier_pill(tier, name) %}
+<span class="pill t{{ tier if tier <= 4 else 4 }}">Tier {{ tier }} · {{ name }}</span>
+{% endmacro %}

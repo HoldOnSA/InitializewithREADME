@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Feed{% endblock %}
+
+{% block content %}
+<header style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:20px">
+  <div>
+    <h1>Live feed</h1>
+    <p class="dim small" style="margin:0">Newest first, straight off the program's event stream.</p>
+  </div>
+  <div class="row" style="align-items:center">
+    <span class="tiny dim" style="display:flex; align-items:center; gap:6px">
+      <span class="dot wait" id="status-dot"></span><span id="status-text">connecting</span>
+    </span>
+    <button class="btn-ghost" id="pause">Pause</button>
+  </div>
+</header>
+
+<div class="row" style="margin-bottom:16px">
+  {% for f in filters %}
+  <button class="chip {{ 'sel' if loop.first }}" data-kinds="{{ f.kinds | join(',') }}">{{ f.label }}</button>
+  {% endfor %}
+</div>
+
+<div class="card" style="padding:0">
+  <ul class="feed" id="feed">
+    {% for e in events %}
+    <li data-kind="{{ e.name }}">
+      <span class="when">{{ e.data.timestamp | ago }}</span>
+      <span class="what">{{ e.html | safe }}</span>
+      <span class="where">{{ e.data.mint | short(4, 3) if e.data.mint else '' }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <div id="empty" class="hint" style="display:none; padding:24px; text-align:center">
+    Nothing matching this filter yet.
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MAX_ROWS = 400;
+let paused = false;
+let activeKinds = [];
+
+const list = document.getElementById("feed");
+
+function applyFilter() {
+  let shown = 0;
+  list.querySelectorAll("li").forEach((row) => {
+    const visible = activeKinds.length === 0 || activeKinds.includes(row.dataset.kind);
+    row.style.display = visible ? "" : "none";
+    if (visible) shown += 1;
+  });
+  document.getElementById("empty").style.display = shown === 0 ? "block" : "none";
+}
+
+document.querySelectorAll("[data-kinds]").forEach((button) => {
+  button.onclick = () => {
+    document.querySelectorAll("[data-kinds]").forEach((b) => b.classList.remove("sel"));
+    button.classList.add("sel");
+    activeKinds = button.dataset.kinds ? button.dataset.kinds.split(",") : [];
+    applyFilter();
+  };
+});
+
+document.getElementById("pause").onclick = (e) => {
+  paused = !paused;
+  e.target.textContent = paused ? "Resume" : "Pause";
+};
+
+/** The server renders each line, so /feed and the token page read identically. */
+async function renderLine(event) {
+  const res = await fetch("/api/render-event", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(event),
+  });
+  return res.json();
+}
+
+connectFeed(
+  async (event) => {
+    if (paused) return;
+    const view = await renderLine(event);
+    const row = document.createElement("li");
+    row.dataset.kind = event.name;
+    row.className = "fresh";
+    row.innerHTML = `
+      <span class="when">${view.when}</span>
+      <span class="what">${view.html}</span>
+      <span class="where">${view.where}</span>`;
+    list.prepend(row);
+    while (list.children.length > MAX_ROWS) list.lastElementChild.remove();
+    applyFilter();
+  },
+  (status) => {
+    const dot = document.getElementById("status-dot");
+    dot.className = "dot " + (status === "open" ? "on" : status === "connecting" ? "wait" : "off");
+    document.getElementById("status-text").textContent = status === "open" ? "live" : status;
+  }
+);
+
+applyFilter();
+</script>
+{% endblock %}

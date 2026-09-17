@@ -1,0 +1,10 @@
+.anchor
+target
+node_modules
+dist
+.next
+.env
+.env.local
+test-ledger
+**/*.rs.bk
+.DS_Store

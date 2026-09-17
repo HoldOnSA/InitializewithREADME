@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}StackApp{% endblock %} — devnet prototype</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234ade80'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' text-anchor='middle' fill='%2307090d'>S</text></svg>">
+</head>
+<body>
+
+<div class="banner">
+  <strong>Devnet prototype.</strong> Test SOL only, unaudited, no mainnet deployment. Do not use with real funds.
+</div>
+
+<nav class="top">
+  <a class="brand" href="/"><span class="mark">S</span> StackApp</a>
+  <span class="links">
+    <a href="/" class="{{ 'active' if page == 'home' }}">Launches</a>
+    <a href="/launch" class="{{ 'active' if page == 'launch' }}">Launch</a>
+    <a href="/feed" class="{{ 'active' if page == 'feed' }}">Feed</a>
+    {% if mode == 'mock' %}<a href="/docs">API</a>{% endif %}
+  </span>
+  <span class="spacer"></span>
+  <span id="wallet-slot"></span>
+</nav>
+
+<main>
+  <div id="toast" class="note" style="display:none; margin-bottom:16px;"></div>
+  {% if mode == 'mock' %}
+    <div class="note info" style="margin-bottom:16px;">
+      <strong>Mock mode.</strong> This data comes from the simulator, not from devnet —
+      the same math the program runs, so the shapes are real. Actions still build real
+      transactions, but they need the program deployed on devnet to land.
+    </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer>
+  <p>
+    StackApp is a devnet prototype of a tenure-weighted launchpad. Going to mainnet would
+    require a full security audit and separate legal review before handling any real user funds.
+  </p>
+  <p>
+    Transactions are assembled on the server as <em>unsigned</em> messages and signed in your
+    wallet. No private key is ever sent anywhere.
+  </p>
+</footer>
+
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

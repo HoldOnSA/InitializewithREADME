@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stackapp-indexer"
+version = "0.1.0"
+description = "Devnet indexer and web UI for the StackApp launchpad prototype"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+# The core decoding, PDA derivation and store are stdlib-only on purpose, so the
+# test suite runs with no install at all. These are only needed to serve.
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "websockets>=12.0",
+  "httpx>=0.26",
+  "jinja2>=3.1",
+  "stackapp-sim",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+stackapp-indexer = "stackapp_indexer.__main__:main"
+
+[tool.setuptools]
+packages = ["stackapp_indexer", "stackapp_indexer.web"]
+
+[tool.setuptools.package-data]
+"stackapp_indexer.web" = ["templates/*.html", "static/*"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.uv.sources]
+stackapp-sim = { path = "../sim" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

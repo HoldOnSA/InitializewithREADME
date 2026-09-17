@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ token.mint | short }}{% endblock %}
+
+{% block content %}
+<header style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:24px">
+  <div>
+    <h1 class="mono" style="font-size:20px">{{ token.mint | short(8, 8) }}</h1>
+    <p class="tiny dim">
+      launched {{ token.ageSeconds | duration }} ago by {{ m.wallet_link(token.creator) }} ·
+      vest {{ 'none' if token.vestDurationSeconds == 0 else token.vestDurationSeconds | duration }}
+    </p>
+  </div>
+  <a class="tiny dim" target="_blank" rel="noreferrer"
+     href="https://explorer.solana.com/address/{{ token.mint }}?cluster=devnet">View on explorer ↗</a>
+</header>
+
+<div class="grid cols-4" style="margin-bottom:24px">
+  <div class="card">{{ m.stat('Spot price', token.curve.spotPriceLamports | price) }}</div>
+  <div class="card">{{ m.stat('Tokens sold', token.curve.tokensSold | tokens(token.decimals),
+                              token.holderCount ~ ' holders') }}</div>
+  <div class="card">{{ m.stat('Curve reserves', token.curve.realSolReserves | sol,
+                              'real SOL backing the curve', 'stack') }}</div>
+  <div class="card">{{ m.stat('Loyalty pool', token.pool.outstanding | tokens(token.decimals),
+                              (token.pool.totalCollected | tokens(token.decimals)) ~ ' collected all time',
+                              'pool') }}</div>
+</div>
+
+<div class="split">
+  <div class="stack-y">
+    <section class="card">
+      <div style="display:flex; justify-content:space-between; align-items:baseline">
+        <h2 style="margin:0">Your position</h2>
+        <span class="tiny dim" id="pos-summary"></span>
+      </div>
+
+      <div id="no-wallet" class="hint" style="margin-top:8px">
+        Connect a devnet wallet to buy, claim vested tokens, or claim your pool share.
+      </div>
+
+      <div id="position" style="display:none; margin-top:16px"></div>
+
+      <hr>
+      <div class="row">
+        <label style="flex:1">
+          <span class="label">Amount (tokens)</span>
+          <input id="amount" value="1000" inputmode="decimal">
+        </label>
+        <button class="btn-primary" id="buy" data-needs-wallet>Buy</button>
+        <button class="btn-ghost" id="sell" data-needs-wallet>Sell</button>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <button class="btn-ghost" id="claim-vested" data-needs-wallet>Claim vested</button>
+        <button class="btn-ghost" id="claim-pool" data-needs-wallet>Claim pool share</button>
+        <button class="btn-ghost" id="update-rep" data-needs-wallet
+                title="Credits your passport once this position has been held past its vest duration">
+          Update reputation
+        </button>
+      </div>
+
+      <details style="margin-top:16px">
+        <summary>Transfer to another wallet (taxed exactly like a sell)</summary>
+        <div>
+          <div class="row">
+            <label style="flex:1">
+              <span class="label">Recipient</span>
+              <input id="recipient" placeholder="devnet address">
+            </label>
+            <button class="btn-ghost" id="transfer" data-needs-wallet>Transfer</button>
+          </div>
+          <p class="hint">
+            The recipient's tokens arrive in a brand-new lot stamped with the current time, so
+            tenure does not travel between wallets.
+          </p>
+        </div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Holders by tenure weight</h2>
+      {% if holders %}
+      <table>
+        <thead><tr>
+          <th>Wallet</th><th class="num">Holding</th><th class="num">Avg hold</th><th class="num">Pool share</th>
+        </tr></thead>
+        <tbody>
+        {% for h in holders %}
+          <tr data-owner="{{ h.owner }}">
+            <td>{{ m.wallet_link(h.owner) }}</td>
+            <td class="num">{{ h.totalRemaining | tokens(token.decimals) }}</td>
+            <td class="num dim">{{ h.averageHoldSeconds | duration }}</td>
+            <td class="num" style="color:var(--pool)">{{ '%.2f' % (h.poolSharePpm / 10000) }}%</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="hint">No holders yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div style="display:flex; justify-content:space-between; align-items:baseline">
+        <h2 style="margin:0">Recent activity</h2>
+        <a class="tiny dim" href="/feed">Full feed →</a>
+      </div>
+      <ul class="feed" style="margin-top:8px">
+        {% for e in events %}
+        <li>
+          <span class="when">{{ e.data.timestamp | ago }}</span>
+          <span class="what">{{ e.html | safe }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <aside class="stack-y">
+    <section class="card">
+      <h2>Sell tax by time held</h2>
+      {{ m.tax_chart(token.chart) }}
+      {{ m.tax_table(token.taxCurve) }}
+      <p class="hint">
+        Charged per FIFO lot against that lot's own age. A wallet-to-wallet transfer pays exactly
+        the same rate.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Pool mechanics</h2>
+      <table>
+        <tbody>
+          <tr><td class="dim" style="border:0">Total collected</td>
+              <td class="num" style="border:0">{{ token.pool.totalCollected | tokens(token.decimals) }}</td></tr>
+          <tr><td class="dim">Paid out</td>
+              <td class="num">{{ token.pool.totalClaimed | tokens(token.decimals) }}</td></tr>
+          <tr><td class="dim">Awaiting claim</td>
+              <td class="num">{{ token.pool.outstanding | tokens(token.decimals) }}</td></tr>
+          <tr><td class="dim" title="tax collected while nobody was eligible; never burned">Buffered</td>
+              <td class="num">{{ token.pool.undistributed | tokens(token.decimals) }}</td></tr>
+          <tr><td class="dim">Weighted shares</td>
+              <td class="num">{{ '{:,}'.format(token.pool.totalWeightedShares) }}</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MINT = "{{ token.mint }}";
+const DECIMALS = {{ token.decimals }};
+
+function baseUnits() {
+  const parsed = Number(document.getElementById("amount").value);
+  if (!isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed * Math.pow(10, DECIMALS));
+}
+
+async function loadPosition() {
+  const host = document.getElementById("position");
+  const empty = document.getElementById("no-wallet");
+  if (!Wallet.pubkey) { host.style.display = "none"; empty.style.display = "block"; return; }
+
+  const res = await fetch(`/api/position-card/${MINT}/${Wallet.pubkey}`);
+  const view = await res.json();
+  empty.style.display = "none";
+  host.style.display = "block";
+  host.innerHTML = view.html;
+  document.getElementById("pos-summary").textContent = view.summary || "";
+
+  // Highlight this wallet in the holders table.
+  document.querySelectorAll("tr[data-owner]").forEach((row) => {
+    row.classList.toggle("me", row.dataset.owner === Wallet.pubkey);
+  });
+}
+
+document.getElementById("buy").onclick = (e) => {
+  const amount = baseUnits();
+  if (!amount) return toast("Enter an amount greater than zero.", "err");
+  sendAction("buy", { mint: MINT, amount }, e.target);
+};
+document.getElementById("sell").onclick = (e) => {
+  const amount = baseUnits();
+  if (!amount) return toast("Enter an amount greater than zero.", "err");
+  sendAction("sell", { mint: MINT, amount }, e.target);
+};
+document.getElementById("claim-vested").onclick = (e) =>
+  sendAction("claim_vested", { mint: MINT }, e.target);
+document.getElementById("claim-pool").onclick = (e) =>
+  sendAction("claim_pool_share", { mint: MINT }, e.target);
+document.getElementById("update-rep").onclick = (e) =>
+  sendAction("update_reputation", { mint: MINT }, e.target);
+document.getElementById("transfer").onclick = (e) => {
+  const amount = baseUnits();
+  const recipient = document.getElementById("recipient").value.trim();
+  if (!amount) return toast("Enter an amount greater than zero.", "err");
+  if (!recipient) return toast("Enter a recipient address.", "err");
+  sendAction("transfer_position", { mint: MINT, amount, recipient }, e.target);
+};
+
+document.addEventListener("wallet", loadPosition);
+loadPosition();
+setInterval(loadPosition, 6000);
+</script>
+{% endblock %}

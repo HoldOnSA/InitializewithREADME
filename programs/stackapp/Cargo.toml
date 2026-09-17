@@ -1,0 +1,22 @@
+[package]
+name = "stackapp"
+version = "0.1.0"
+description = "StackApp - tenure-weighted memecoin launchpad (devnet prototype)"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "stackapp"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+# `init-if-needed` is used for Position and Reputation PDAs, which are created
+# lazily on a wallet's first buy / first reputation credit.
+anchor-lang = { version = "0.30.1", features = ["init-if-needed"] }

@@ -20,10 +20,11 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+test = "NODE_OPTIONS=--no-experimental-strip-types yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 
 [test]
 startup_wait = 15000
 
 [test.validator]
+bind_address = "127.0.0.1"
 slots_per_epoch = "32"

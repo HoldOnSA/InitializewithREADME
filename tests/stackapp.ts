@@ -23,6 +23,8 @@ import {
   CURVES,
   Launch,
   MIN_CLAIM_DELAY_SLOTS,
+  REPUTATION_CURVE_RESERVES,
+  REPUTATION_TEST_BUY_AMOUNT,
   expectFailure,
   fundedWallet,
   pdas,
@@ -32,7 +34,16 @@ import {
 } from "./helpers";
 
 describe("stackapp", () => {
-  const provider = anchor.AnchorProvider.env();
+  // `AnchorProvider.env()` defaults to "processed" commitment, so `.rpc()`
+  // calls can resolve before the change is visible at "confirmed" - which is
+  // what every balance/account read in these tests uses. Pin both to
+  // "confirmed" so a read right after a write is never racing it.
+  const env = anchor.AnchorProvider.env();
+  const provider = new anchor.AnchorProvider(
+    new anchor.web3.Connection(env.connection.rpcEndpoint, "confirmed"),
+    env.wallet,
+    { commitment: "confirmed", preflightCommitment: "confirmed" }
+  );
   anchor.setProvider(provider);
   const program = anchor.workspace.Stackapp as Program<Stackapp>;
 
@@ -516,13 +527,16 @@ describe("stackapp", () => {
 
   describe("reputation", () => {
     it("credits a position held past its vest duration", async () => {
-      const alice = await fundedWallet(provider);
+      // A big enough buy that cost_basis_lamports clears the reputation
+      // divisor within seconds - see REPUTATION_CURVE_RESERVES.
+      const alice = await fundedWallet(provider, 300);
       const launch = await Launch.create(program, provider, creator, {
         taxCurve: CURVES.flat,
         vestSeconds: 3,
+        ...REPUTATION_CURVE_RESERVES,
       });
 
-      await launch.buy(alice, 200_000_000_000);
+      await launch.buy(alice, REPUTATION_TEST_BUY_AMOUNT);
       await expectFailure(launch.updateReputation(alice), "NotMatured");
 
       await waitSeconds(provider, 4);
@@ -554,20 +568,21 @@ describe("stackapp", () => {
     });
 
     it("keeps reputation with the wallet, not the tokens", async () => {
-      const alice = await fundedWallet(provider);
+      const alice = await fundedWallet(provider, 300);
       const bob = await fundedWallet(provider);
       const launch = await Launch.create(program, provider, creator, {
         taxCurve: CURVES.flat,
         vestSeconds: 2,
+        ...REPUTATION_CURVE_RESERVES,
       });
 
-      await launch.buy(alice, 200_000_000_000);
+      await launch.buy(alice, REPUTATION_TEST_BUY_AMOUNT);
       await waitSeconds(provider, 3);
       await launch.claimVested(alice);
       await launch.updateReputation(alice);
 
       const aliceScore = (await launch.reputation(alice.publicKey)).score;
-      await launch.transfer(alice, bob.publicKey, 50_000_000_000);
+      await launch.transfer(alice, bob.publicKey, 300_000);
 
       assert.equal(
         (await launch.reputation(alice.publicKey)).score.toString(),

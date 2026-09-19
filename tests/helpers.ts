@@ -26,6 +26,26 @@ export const CURVES = {
   flat: [point(0, 2_000)],
 };
 
+/**
+ * Reputation score is `capital_lamports * window_seconds / REP_SCORE_DIVISOR`
+ * (1 SOL held 1 day == 1000 points), a calibration meant for real holding
+ * periods measured in days. Against the *default* bonding curve, a
+ * test-sized buy costs only a fraction of a lamport-day of capital, so held
+ * for the few seconds a local validator can actually wait, its score rounds
+ * down to exactly zero.
+ *
+ * A tiny, shallow curve makes a fundable amount of real SOL buy nearly the
+ * *entire* virtual supply, which is what pushes `cost_basis_lamports` high
+ * enough (~247 SOL, for a ~99% buy) to clear that threshold within seconds
+ * instead of days. Pair with `REPUTATION_TEST_BUY_AMOUNT` and fund the buyer
+ * well above the resulting cost.
+ */
+export const REPUTATION_CURVE_RESERVES = {
+  virtualSolReserves: 2_500_000_000, // 2.5 SOL
+  virtualTokenReserves: 1_000_000,
+};
+export const REPUTATION_TEST_BUY_AMOUNT = 990_000; // 99% of the virtual supply above
+
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Wait until the validator's wall clock has advanced past `seconds`. */
@@ -128,7 +148,12 @@ export class Launch {
     program: Program<Stackapp>,
     provider: anchor.AnchorProvider,
     creator: Keypair,
-    opts: { taxCurve?: TaxPoint[]; vestSeconds?: number } = {}
+    opts: {
+      taxCurve?: TaxPoint[];
+      vestSeconds?: number;
+      virtualSolReserves?: anchor.BN | number;
+      virtualTokenReserves?: anchor.BN | number;
+    } = {}
   ): Promise<Launch> {
     const mint = Keypair.generate();
     const p = pdas(program.programId);
@@ -137,8 +162,8 @@ export class Launch {
       .initializeLaunch(
         opts.taxCurve ?? CURVES.fast,
         new anchor.BN(opts.vestSeconds ?? 0),
-        new anchor.BN(0), // default virtual SOL reserves
-        new anchor.BN(0), // default virtual token reserves
+        new anchor.BN(opts.virtualSolReserves ?? 0), // 0 == prototype default
+        new anchor.BN(opts.virtualTokenReserves ?? 0), // 0 == prototype default
         6
       )
       .accounts({

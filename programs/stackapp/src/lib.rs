@@ -31,7 +31,7 @@ pub mod state;
 use instructions::*;
 use state::TaxPoint;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("GGqhbbXPZg2GGZP1o7CUeNkqATybrDJbX7cxJiwEzaFL");
 
 #[program]
 pub mod stackapp {

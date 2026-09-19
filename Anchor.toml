@@ -6,17 +6,17 @@ solana_version = "4.2.2"
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-stackapp = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
-
 [programs.devnet]
-stackapp = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+stackapp = "GGqhbbXPZg2GGZP1o7CUeNkqATybrDJbX7cxJiwEzaFL"
+
+[programs.localnet]
+stackapp = "GGqhbbXPZg2GGZP1o7CUeNkqATybrDJbX7cxJiwEzaFL"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "Localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
@@ -24,7 +24,11 @@ test = "NODE_OPTIONS=--no-experimental-strip-types yarn run ts-mocha -p ./tsconf
 
 [test]
 startup_wait = 15000
+shutdown_wait = 2000
+upgradeable = false
 
 [test.validator]
 bind_address = "127.0.0.1"
+ledger = ".anchor/test-ledger"
+rpc_port = 8899
 slots_per_epoch = "32"

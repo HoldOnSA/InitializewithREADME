@@ -7,96 +7,119 @@
   <div>
     <h1 class="mono" style="font-size:20px">{{ token.mint | short(8, 8) }}</h1>
     <p class="tiny dim">
-      launched {{ token.ageSeconds | duration }} ago by {{ m.wallet_link(token.creator) }} ·
-      vest {{ 'none' if token.vestDurationSeconds == 0 else token.vestDurationSeconds | duration }}
+      registered {{ token.ageSeconds | duration }} ago · creator {{ m.wallet_link(token.creator) }}
     </p>
   </div>
   <a class="tiny dim" target="_blank" rel="noreferrer"
-     href="https://explorer.solana.com/address/{{ token.mint }}?cluster=devnet">View on explorer ↗</a>
+     href="https://explorer.solana.com/address/{{ token.mint }}?cluster=devnet">View mint on explorer ↗</a>
 </header>
 
 <div class="grid cols-4" style="margin-bottom:24px">
-  <div class="card">{{ m.stat('Spot price', token.curve.spotPriceLamports | price) }}</div>
-  <div class="card">{{ m.stat('Tokens sold', token.curve.tokensSold | tokens(token.decimals),
-                              token.holderCount ~ ' holders') }}</div>
-  <div class="card">{{ m.stat('Curve reserves', token.curve.realSolReserves | sol,
-                              'real SOL backing the curve', 'stack') }}</div>
-  <div class="card">{{ m.stat('Loyalty pool', token.pool.outstanding | tokens(token.decimals),
-                              (token.pool.totalCollected | tokens(token.decimals)) ~ ' collected all time',
-                              'pool') }}</div>
+  <div class="card">{{ m.stat('Registrations', token.registrationCount,
+                              (token.pendingRegistrationCount ~ ' pending') if token.pendingRegistrationCount else None) }}</div>
+  <div class="card">{{ m.stat('Deposit vault', token.vaultLamports | sol, 'markers + donations, minus payouts') }}</div>
+  <div class="card">{{ m.stat('Loyalty pool', token.pool.outstanding | sol,
+                              (token.pool.totalCollected | sol) ~ ' donated all time', 'pool') }}</div>
+  <div class="card">{{ m.stat('Marker amount', token.registrationMarkerLamports | sol,
+                              'send this exactly, from your own wallet, to the deposit vault below') }}</div>
 </div>
 
 <div class="split">
   <div class="stack-y">
     <section class="card">
       <div style="display:flex; justify-content:space-between; align-items:baseline">
-        <h2 style="margin:0">Your position</h2>
-        <span class="tiny dim" id="pos-summary"></span>
+        <h2 style="margin:0">Your registration</h2>
+        <span class="tiny dim" id="reg-summary"></span>
       </div>
 
       <div id="no-wallet" class="hint" style="margin-top:8px">
-        Connect a devnet wallet to buy, claim vested tokens, or claim your pool share.
+        Connect a devnet wallet to see your registration and sync, claim or donate.
       </div>
 
-      <div id="position" style="display:none; margin-top:16px"></div>
+      <div id="registration" style="display:none; margin-top:16px"></div>
 
       <hr>
-      <div class="row">
-        <label style="flex:1">
-          <span class="label">Amount (tokens)</span>
-          <input id="amount" value="1000" inputmode="decimal">
-        </label>
-        <button class="btn-primary" id="buy" data-needs-wallet>Buy</button>
-        <button class="btn-ghost" id="sell" data-needs-wallet>Sell</button>
-      </div>
+      <p class="hint">
+        <strong>Step 1.</strong> Send exactly {{ token.registrationMarkerLamports | sol }} from
+        your own wallet to the deposit vault
+        (<span class="mono">{{ token.depositVault | short(6, 6) }}</span>) - a plain SOL transfer,
+        no program interaction. The indexer picks it up and queues it below for the operator to
+        write on chain.
+      </p>
+      <p class="hint">
+        <strong>Step 2.</strong> Once written, sync or claim below - both re-read your live
+        balance, so there's nothing else to do after that.
+      </p>
 
       <div class="row" style="margin-top:12px">
-        <button class="btn-ghost" id="claim-vested" data-needs-wallet>Claim vested</button>
-        <button class="btn-ghost" id="claim-pool" data-needs-wallet>Claim pool share</button>
-        <button class="btn-ghost" id="update-rep" data-needs-wallet
-                title="Credits your passport once this position has been held past its vest duration">
-          Update reputation
-        </button>
+        <button class="btn-ghost" id="sync" data-needs-wallet>Sync my weight</button>
+        <button class="btn-primary" id="claim" data-needs-wallet>Claim my share</button>
       </div>
 
       <details style="margin-top:16px">
-        <summary>Transfer to another wallet (taxed exactly like a sell)</summary>
-        <div>
-          <div class="row">
-            <label style="flex:1">
-              <span class="label">Recipient</span>
-              <input id="recipient" placeholder="devnet address">
-            </label>
-            <button class="btn-ghost" id="transfer" data-needs-wallet>Transfer</button>
-          </div>
-          <p class="hint">
-            The recipient's tokens arrive in a brand-new lot stamped with the current time, so
-            tenure does not travel between wallets.
-          </p>
+        <summary>Donate SOL to this pool</summary>
+        <div class="row">
+          <label style="flex:1">
+            <span class="label">Amount (SOL)</span>
+            <input id="donate-amount" value="0.01" inputmode="decimal">
+          </label>
+          <button class="btn-ghost" id="donate" data-needs-wallet>Donate</button>
         </div>
+        <p class="hint">
+          The only source of real fee revenue - typically the creator, right after claiming
+          their own pump.fun fee normally. Anyone can call this; nobody can earmark a donation
+          for themselves.
+        </p>
       </details>
     </section>
 
+    {% if pending %}
     <section class="card">
-      <h2>Holders by tenure weight</h2>
-      {% if holders %}
+      <h2>Pending registrations</h2>
+      <p class="hint">
+        Marker transfers the indexer noticed but hasn't written on chain yet. Only the wallet
+        holding <code>GlobalConfig.authority</code> can actually make these land - see
+        <code>SECURITY_NOTES.md</code>.
+      </p>
+      <table>
+        <thead><tr><th>Wallet</th><th class="num">Amount</th><th></th></tr></thead>
+        <tbody>
+        {% for p in pending %}
+          <tr>
+            <td>{{ m.wallet_link(p.owner) }}</td>
+            <td class="num">{{ p.amount | sol }}</td>
+            <td class="num">
+              <button class="btn-ghost write-registration" data-owner="{{ p.owner }}" data-needs-wallet>
+                Write registration
+              </button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
+    <section class="card">
+      <h2>Registrations by weight</h2>
+      {% if registrations %}
       <table>
         <thead><tr>
-          <th>Wallet</th><th class="num">Holding</th><th class="num">Avg hold</th><th class="num">Pool share</th>
+          <th>Wallet</th><th class="num">Weight</th><th class="num">Tenure ×</th><th class="num">Pool share</th>
         </tr></thead>
         <tbody>
-        {% for h in holders %}
-          <tr data-owner="{{ h.owner }}">
-            <td>{{ m.wallet_link(h.owner) }}</td>
-            <td class="num">{{ h.totalRemaining | tokens(token.decimals) }}</td>
-            <td class="num dim">{{ h.averageHoldSeconds | duration }}</td>
-            <td class="num" style="color:var(--pool)">{{ '%.2f' % (h.poolSharePpm / 10000) }}%</td>
+        {% for r in registrations %}
+          <tr data-owner="{{ r.owner }}">
+            <td>{{ m.wallet_link(r.owner) }}</td>
+            <td class="num">{{ '{:,}'.format(r.weightedShares) }}</td>
+            <td class="num dim">{{ '%.2f' % (r.tenureMultiplierBps / 10000) }}×</td>
+            <td class="num" style="color:var(--pool)">{{ '%.4f' % (r.poolSharePpm / 10000) }}%</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
       {% else %}
-        <p class="hint">No holders yet.</p>
+        <p class="hint">No registrations yet.</p>
       {% endif %}
     </section>
 
@@ -118,12 +141,21 @@
 
   <aside class="stack-y">
     <section class="card">
-      <h2>Sell tax by time held</h2>
-      {{ m.tax_chart(token.chart) }}
-      {{ m.tax_table(token.taxCurve) }}
+      <h2>Tenure tiers</h2>
+      <table>
+        <thead><tr><th>Held for</th><th class="num">Multiplier</th></tr></thead>
+        <tbody>
+        {% for held, mult in tenure_tiers %}
+          <tr>
+            <td>{{ 'less than 1 minute' if loop.first else held | duration }}</td>
+            <td class="num" style="color:var(--stack)">{{ '%.2f' % (mult / 10000) }}×</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
       <p class="hint">
-        Charged per FIFO lot against that lot's own age. A wallet-to-wallet transfer pays exactly
-        the same rate.
+        Applied to your live balance, not a snapshot. Splitting a balance across wallets sums to
+        the same total weight, never more.
       </p>
     </section>
 
@@ -131,14 +163,14 @@
       <h2>Pool mechanics</h2>
       <table>
         <tbody>
-          <tr><td class="dim" style="border:0">Total collected</td>
-              <td class="num" style="border:0">{{ token.pool.totalCollected | tokens(token.decimals) }}</td></tr>
+          <tr><td class="dim" style="border:0">Total donated</td>
+              <td class="num" style="border:0">{{ token.pool.totalCollected | sol }}</td></tr>
           <tr><td class="dim">Paid out</td>
-              <td class="num">{{ token.pool.totalClaimed | tokens(token.decimals) }}</td></tr>
+              <td class="num">{{ token.pool.totalClaimed | sol }}</td></tr>
           <tr><td class="dim">Awaiting claim</td>
-              <td class="num">{{ token.pool.outstanding | tokens(token.decimals) }}</td></tr>
-          <tr><td class="dim" title="tax collected while nobody was eligible; never burned">Buffered</td>
-              <td class="num">{{ token.pool.undistributed | tokens(token.decimals) }}</td></tr>
+              <td class="num">{{ token.pool.outstanding | sol }}</td></tr>
+          <tr><td class="dim" title="donated while nobody was eligible; never burned">Buffered</td>
+              <td class="num">{{ token.pool.undistributed | sol }}</td></tr>
           <tr><td class="dim">Weighted shares</td>
               <td class="num">{{ '{:,}'.format(token.pool.totalWeightedShares) }}</td></tr>
         </tbody>
@@ -151,58 +183,41 @@
 {% block scripts %}
 <script>
 const MINT = "{{ token.mint }}";
-const DECIMALS = {{ token.decimals }};
 
-function baseUnits() {
-  const parsed = Number(document.getElementById("amount").value);
-  if (!isFinite(parsed) || parsed <= 0) return null;
-  return Math.floor(parsed * Math.pow(10, DECIMALS));
-}
-
-async function loadPosition() {
-  const host = document.getElementById("position");
+async function loadRegistration() {
+  const host = document.getElementById("registration");
   const empty = document.getElementById("no-wallet");
   if (!Wallet.pubkey) { host.style.display = "none"; empty.style.display = "block"; return; }
 
-  const res = await fetch(`/api/position-card/${MINT}/${Wallet.pubkey}`);
+  const res = await fetch(`/api/registration-card/${MINT}/${Wallet.pubkey}`);
   const view = await res.json();
   empty.style.display = "none";
   host.style.display = "block";
   host.innerHTML = view.html;
-  document.getElementById("pos-summary").textContent = view.summary || "";
+  document.getElementById("reg-summary").textContent = view.summary || "";
 
-  // Highlight this wallet in the holders table.
   document.querySelectorAll("tr[data-owner]").forEach((row) => {
     row.classList.toggle("me", row.dataset.owner === Wallet.pubkey);
   });
 }
 
-document.getElementById("buy").onclick = (e) => {
-  const amount = baseUnits();
-  if (!amount) return toast("Enter an amount greater than zero.", "err");
-  sendAction("buy", { mint: MINT, amount }, e.target);
-};
-document.getElementById("sell").onclick = (e) => {
-  const amount = baseUnits();
-  if (!amount) return toast("Enter an amount greater than zero.", "err");
-  sendAction("sell", { mint: MINT, amount }, e.target);
-};
-document.getElementById("claim-vested").onclick = (e) =>
-  sendAction("claim_vested", { mint: MINT }, e.target);
-document.getElementById("claim-pool").onclick = (e) =>
-  sendAction("claim_pool_share", { mint: MINT }, e.target);
-document.getElementById("update-rep").onclick = (e) =>
-  sendAction("update_reputation", { mint: MINT }, e.target);
-document.getElementById("transfer").onclick = (e) => {
-  const amount = baseUnits();
-  const recipient = document.getElementById("recipient").value.trim();
-  if (!amount) return toast("Enter an amount greater than zero.", "err");
-  if (!recipient) return toast("Enter a recipient address.", "err");
-  sendAction("transfer_position", { mint: MINT, amount, recipient }, e.target);
+document.getElementById("sync").onclick = (e) =>
+  sendAction("sync", { mint: MINT, owner: Wallet.pubkey }, e.target);
+document.getElementById("claim").onclick = (e) =>
+  sendAction("claim", { mint: MINT }, e.target);
+document.getElementById("donate").onclick = (e) => {
+  const sol = Number(document.getElementById("donate-amount").value);
+  if (!isFinite(sol) || sol <= 0) return toast("Enter an amount greater than zero.", "err");
+  sendAction("donate", { mint: MINT, amount: Math.floor(sol * 1_000_000_000) }, e.target);
 };
 
-document.addEventListener("wallet", loadPosition);
-loadPosition();
-setInterval(loadPosition, 6000);
+document.querySelectorAll(".write-registration").forEach((button) => {
+  button.onclick = () =>
+    sendAction("write_registration", { mint: MINT, owner: button.dataset.owner }, button);
+});
+
+document.addEventListener("wallet", loadRegistration);
+loadRegistration();
+setInterval(loadRegistration, 6000);
 </script>
 {% endblock %}

@@ -14,39 +14,23 @@ from .constants import (  # noqa: F401
     BPS_DENOMINATOR,
     DAY,
     LAMPORTS_PER_SOL,
-    MAX_LOTS,
     MIN_CLAIM_DELAY_SLOTS,
-    TIER_NAMES,
+    MINUTE,
+    TENURE_TIER_MULTIPLIER_BPS,
+    TENURE_TIER_SECONDS,
 )
 from .logic import StackError  # noqa: F401
 from .market import Market  # noqa: F401
-from .state import (  # noqa: F401
-    ExitBreakdown,
-    Lot,
-    LoyaltyPool,
-    Position,
-    Reputation,
-    TokenConfig,
-)
-
-# Handy presets matching the /launch page.
-TAX_CURVE_PRESETS = {
-    # name: [(seconds_held, tax_bps), ...]
-    "diamond": [(0, 3_000), (3_600, 2_000), (86_400, 1_000), (604_800, 0)],
-    "gentle": [(0, 1_000), (3_600, 500), (86_400, 200), (604_800, 0)],
-    "brutal": [(0, 9_000), (3_600, 6_000), (86_400, 3_000), (2_592_000, 500)],
-    "flat": [(0, 500)],
-}
+from .state import DepositVault, GlobalConfig, LoyaltyPool, Registration, TokenConfig  # noqa: F401
 
 __all__ = [
     "Market",
     "StackError",
-    "Position",
-    "LoyaltyPool",
+    "GlobalConfig",
     "TokenConfig",
-    "Reputation",
-    "Lot",
-    "ExitBreakdown",
-    "TAX_CURVE_PRESETS",
-    "TIER_NAMES",
+    "DepositVault",
+    "Registration",
+    "LoyaltyPool",
+    "TENURE_TIER_SECONDS",
+    "TENURE_TIER_MULTIPLIER_BPS",
 ]

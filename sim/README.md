@@ -1,19 +1,20 @@
 # stackapp-sim
 
-A faithful Python mirror of the Anchor program's math and state transitions.
+A faithful Python mirror of the Anchor program's math and state transitions -
+StackApp's loyalty layer on top of real pump.fun tokens.
 
 It exists for two reasons:
 
 1. **The rules can be exercised anywhere Python runs.** No Rust, no Solana CLI,
    no Anchor, no validator, no network, no pip install. The accumulator
    arithmetic and every anti-gaming rule are covered here.
-2. **The indexer computes derived numbers with it.** Vesting %, current tax rate
-   and projected pool share on the dashboard come from this package, so the UI
-   and the program cannot quietly disagree.
+2. **The indexer computes derived numbers with it.** Tenure multiplier and
+   projected claimable share on the dashboard come from this package, so the
+   UI and the program cannot quietly disagree.
 
 This is a *model*, not the deployed artifact. `programs/stackapp` is the real
-thing. `tests/test_parity.py` parses the Rust source and fails if the constants,
-PDA seeds, tenure tiers or instruction list drift apart.
+thing. `tests/test_parity.py` parses the Rust source and fails if the
+constants, PDA seeds, tenure tiers or instruction list drift apart.
 
 ## Run it
 
@@ -30,25 +31,27 @@ are plain `unittest.TestCase` classes.
 | Module | Mirrors |
 |---|---|
 | `constants.py` | `src/constants.rs` |
-| `math.py` | `src/math/` — accumulator, tax curve, vesting, tenure, bonding curve |
-| `state.py` | `src/state/` — `Lot`, `Position`, `LoyaltyPool`, `TokenConfig`, `Reputation` |
+| `math.py` | `src/math/` — accumulator, tenure |
+| `state.py` | `src/state/` — `GlobalConfig`, `TokenConfig`, `DepositVault`, `Registration`, `LoyaltyPool` |
 | `logic.py` | `src/logic.rs` — the ordered state transitions |
-| `market.py` | `src/instructions/` — one `Market` per launch, plus `assert_invariants()` |
+| `market.py` | `src/instructions/` — one `Market` per registered token, plus `assert_invariants()` |
+
+There's no bonding curve, tax curve, vesting or reputation here - StackApp
+doesn't run the trade for these tokens (pump.fun does), so there's nothing on
+that side for the sim to mirror. `Market.balances` stands in for "the live
+SPL balance a `sync`/`claim` would read on chain"; tests move it directly
+with `set_balance`, since real balance changes happen entirely outside this
+program.
 
 ## The invariants
 
-`Market.assert_invariants()` checks all of these at once, and the long-run test
-calls it after every one of 400 random operations:
+`Market.assert_invariants()` checks all of these at once, and the long-run
+test calls it after every one of 400 random operations:
 
-- `position.spendable == sum(lot.released)` for every wallet
-- no lot has `cum_released > original` or `released > original`
-- no empty lot survives pruning
-- `pool.total_weighted_shares == sum(position.weighted_shares)`
-- `pool.total_claimed + everything owed <= pool.total_collected` — the pool can
-  never become insolvent
-- the curve vault is non-negative and equals `virtual_sol_reserves` minus its
-  launch value
-- token conservation: `tokens_sold == sum(positions) + (collected - claimed)`
+- `pool.total_weighted_shares == sum(registration.weighted_shares)`
+- `pool.total_claimed + everything owed <= pool.total_collected` — the pool
+  can never become insolvent
+- the deposit vault's lamport balance is non-negative
 
 Integer rounding is mirrored exactly — floors where the Rust floors, ceilings
 where it ceils — so a Python result and an on-chain result agree bit for bit.

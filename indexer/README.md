@@ -43,44 +43,47 @@ see the root README.
 Pages (server-rendered Jinja, in `stackapp_indexer/web/`):
 
 ```
-GET  /                            every launch
-GET  /launch                      create a TokenConfig
-GET  /token/{mint}                dashboard: curve, your position, pool, holders
-GET  /passport/{wallet}           reputation tier, perks, hold stats
+GET  /                            every registered token, plus a register-a-token panel
+GET  /token/{mint}                pool, your registration, pending marker candidates, holders
 GET  /feed                        live event feed
 ```
 
 JSON API — under `/api` precisely so it cannot shadow the pages above:
 
 ```
-GET  /api/health                  subscriber state, store stats, known events
-GET  /api/tokens                  every launch, newest first
-GET  /api/tokens/{mint}           curve state, tax curve, pool
-GET  /api/tokens/{mint}/holders   positions by tenure weight
-GET  /api/positions/{owner}       every position for a wallet
-GET  /api/positions/{mint}/{owner}
-GET  /api/passport/{wallet}
+GET  /api/health                       subscriber state, store stats, known events
+GET  /api/tokens                       every registered token, newest first
+GET  /api/tokens/{mint}                pool state, deposit vault balance
+GET  /api/tokens/{mint}/registrations  registrations by weight
+GET  /api/tokens/{mint}/pending        marker-transfer candidates awaiting write_registration
+GET  /api/registrations/{owner}        every registration for a wallet
+GET  /api/registrations/{mint}/{owner}
 GET  /api/feed?limit=&mint=&owner=&kind=
 GET  /api/pdas/{mint}?owner=
-WS   /ws                          live feed: backlog, then events, newest first
+WS   /ws                               live feed: backlog, then events, newest first
 ```
 
 Plus the browser helpers the UI uses: `POST /api/tx/{action}` (build an unsigned
-message), `POST /api/preview`, `POST /api/render-event`,
-`GET /api/position-card/{mint}/{owner}`, `GET /api/suggest-mint`.
+message), `POST /api/render-event`, `GET /api/registration-card/{mint}/{owner}`.
 
-`u128` fields (`accRewardPerShare`, reputation `score`) are serialised as
-**strings** — JSON numbers lose precision past 2^53.
+`u128` fields (`accRewardPerShare`) are serialised as **strings** — JSON
+numbers lose precision past 2^53.
 
 ## How it works
 
-Two sources feed one in-memory store:
+Three sources feed one in-memory store:
 
 - **`logsSubscribe`** on the program — the event stream. Low latency, but logs
   can be dropped across a reconnect.
 - **`programSubscribe`** plus a periodic `getProgramAccounts` sweep — the
   authoritative account state, which backfills anything the log stream missed. A
   sweep also runs on every reconnect.
+- **A periodic sweep of every known `DepositVault`** for marker-transfer
+  *candidates* — plain SOL transfers that never mention the program at all, so
+  `logsSubscribe` can never see them. This never writes a `Registration`
+  itself; it only queues a `PendingRegistration` for the operator (holding
+  `GlobalConfig.authority`) to review and sign `write_registration` for. See
+  `subscriber.py`'s module docstring and `SECURITY_NOTES.md`.
 
 RPC is plain JSON-RPC over `websockets` / `httpx`, so the wire format is visible
 in `subscriber.py` rather than hidden behind a client library.
@@ -108,10 +111,14 @@ do once a Node toolchain is available.
 ## The wallet flow
 
 The UI has no bundler and loads no JavaScript SDK. Transactions are assembled in
-Python and signed in the browser:
+Python and signed in the browser - including `register_mint` and
+`write_registration`, which are authority-gated on chain but built and signed
+exactly like everything else: whichever wallet the operator connects. If
+that isn't the real `GlobalConfig.authority`, the transaction just fails on
+chain.
 
 ```
-browser  POST /api/tx/buy {wallet, mint, amount}
+browser  POST /api/tx/donate {wallet, mint, amount}
 server   txbuild.py builds an UNSIGNED legacy transaction message,
          base58-encodes it, and returns it
 browser  window.solana.request({method: "signAndSendTransaction",
@@ -136,9 +143,9 @@ parses the Rust and checks every instruction.
 Tailwind and Next.js both need a Node build step. Since the point of this
 checkout is that it runs on Python alone, the pages are Jinja templates with
 hand-written CSS and about 200 lines of dependency-free JavaScript for the wallet
-and the live feed. Everything that needs real arithmetic — durations, token and
-SOL formatting, the tax-curve SVG paths, event lines — is computed in
-`web/format.py` and `web/events.py`, where `tests/test_web.py` can check it.
+and the live feed. Everything that needs real arithmetic — durations, SOL
+formatting, tenure multipliers, event lines — is computed in `web/format.py`
+and `web/events.py`, where `tests/test_web.py` can check it.
 
 One footgun worth knowing about, since it bit twice: this package uses
 `from __future__ import annotations`, which turns annotations into strings that

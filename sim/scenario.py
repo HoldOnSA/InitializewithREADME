@@ -1,4 +1,4 @@
-"""A narrated walk-through of the StackApp mechanics.
+"""A narrated walk-through of the StackApp loyalty-layer mechanics.
 
     python scenario.py
 
@@ -8,14 +8,13 @@ the rules working rather than just read an assertion.
 
 from __future__ import annotations
 
-from stackapp_sim import TAX_CURVE_PRESETS, Market, StackError
-from stackapp_sim.constants import DAY, LAMPORTS_PER_SOL as SOL, MIN_CLAIM_DELAY_SLOTS, TIER_NAMES
-
-CURVE = TAX_CURVE_PRESETS["diamond"]
+from stackapp_sim import Market, StackError
+from stackapp_sim.constants import LAMPORTS_PER_SOL as SOL
+from stackapp_sim.constants import MIN_CLAIM_DELAY_SLOTS, MINUTE, TENURE_TIER_SECONDS
 
 
 def sol(lamports: int) -> str:
-    return f"{lamports / SOL:,.4f} SOL"
+    return f"{lamports / SOL:,.6f} SOL"
 
 
 def rule(title: str) -> None:
@@ -25,91 +24,64 @@ def rule(title: str) -> None:
     print("=" * 72)
 
 
-def scenario_fifo() -> None:
-    rule("1. FIFO lots: a top-up cannot hide behind an old position's tenure")
-    m = Market.launch(CURVE, vest_duration_seconds=0)
-    m.buy("alice", 1_000)
-    print("  t+0d    alice buys 1,000")
-    m.advance(30 * DAY)
-    m.buy("alice", 1_000)
-    print("  t+30d   alice buys another 1,000 (the 'top-up')")
-    m.claim_vested("alice")
+def scenario_registration_and_tenure() -> None:
+    rule("1. Registration is honor-system; weight is not")
+    m = Market.register()
+    m.write_registration("alice")
+    m.set_balance("alice", 1_000_000)
+    print("  t+0s   alice registers and holds 1,000,000 tokens")
 
-    out = m.sell("alice", 2_000)
-    print(f"  t+30d   alice sells all 2,000 -> tax {out.tax}")
-    print("          lot 1 (30 days old) taxed at    0 bps")
-    print("          lot 2 (0 seconds old) taxed at 3000 bps")
-    print("          an average-age model would have charged 0 - it would have")
-    print("          let the fresh 1,000 inherit the old lot's tenure.")
-
-
-def scenario_transfer() -> None:
-    rule("2. A wallet-to-wallet transfer is taxed exactly like a sell")
-    sold = Market.launch(CURVE, vest_duration_seconds=0)
-    sold.buy("alice", 5_000)
-    sold.advance(2 * DAY)
-    sold.claim_vested("alice")
-    a = sold.sell("alice", 4_000)
-
-    moved = Market.launch(CURVE, vest_duration_seconds=0)
-    moved.buy("alice", 5_000)
-    moved.advance(2 * DAY)
-    moved.claim_vested("alice")
-    b = moved.transfer("alice", "bob", 4_000)
-
-    print(f"  sell 4,000 after 2 days     -> tax {a.tax:>5}  net {a.net:>5}")
-    print(f"  transfer 4,000 after 2 days -> tax {b.tax:>5}  net {b.net:>5}")
-    print("  Identical. The only untaxed destination is the pool itself, and")
-    print("  that path gives the tokens away.")
-
-    dumped = moved.sell("bob", b.net)
-    print(f"  bob then dumps immediately  -> tax {dumped.tax} at "
-          f"{dumped.top_tax_bps} bps: tenure did not travel with the tokens.")
+    for label, seconds in [
+        ("just registered", 0),
+        ("after 1 minute", TENURE_TIER_SECONDS[0]),
+        ("after 10 minutes", TENURE_TIER_SECONDS[1]),
+        ("after 30 minutes", TENURE_TIER_SECONDS[2]),
+    ]:
+        m.now = seconds
+        weight = m.sync("alice")
+        print(f"  {label:<20} -> weighted shares {weight:,}")
+    print("  Weight only ever comes from a LIVE balance read at sync/claim time -")
+    print("  the indexer's write_registration can start the tenure clock, but it")
+    print("  can never fabricate or inflate the balance side of the weight.")
 
 
-def scenario_pool() -> None:
-    rule("3. The loyalty pool: O(1) distribution, no retroactive earning")
-    m = Market.launch(CURVE, vest_duration_seconds=0)
-    m.buy("diamond", 10_000_000)
-    print("  t+0d    diamond buys 10,000,000 and sits on it")
-    m.advance(30 * DAY)
-    m.claim_vested("diamond")
+def scenario_donate_and_claim() -> None:
+    rule("2. donate is the only source of real fee revenue")
+    m = Market.register()
+    m.write_registration("diamond")
+    m.set_balance("diamond", 10_000_000)
+    m.now = TENURE_TIER_SECONDS[1]
+    m.sync("diamond")
 
-    m.buy("flipper", 10_000_000)
-    m.claim_vested("flipper")
-    out = m.sell("flipper", 10_000_000)
-    print(f"  t+30d   flipper buys and dumps in the same second")
-    print(f"          -> {out.tax:,} tokens of tax routed to the pool")
-
-    m.buy("latecomer", 50_000_000)
-    print("  t+30d   latecomer buys 50,000,000 *after* the tax landed")
-    print(f"          latecomer claimable: {m.claimable('latecomer'):,}  (zero - not retroactive)")
-    print(f"          diamond   claimable: {m.claimable('diamond'):,}")
+    m.donate("creator", 5_000_000)
+    print(f"  creator donates {sol(5_000_000)} after claiming it from pump.fun normally")
+    print(f"  diamond's projected claimable: {m.claimable('diamond'):,} lamports")
 
     try:
-        m.claim_pool_share("latecomer")
+        m.claim("diamond")
     except StackError as exc:
-        print(f"          latecomer claim in the same block -> rejected ({exc})")
+        print(f"  claim in the same slot -> rejected ({exc})")
 
     m.advance(slots=MIN_CLAIM_DELAY_SLOTS)
-    payout = m.claim_pool_share("diamond")
-    print(f"  +{MIN_CLAIM_DELAY_SLOTS} slots diamond claims {payout:,} tokens")
-    m.assert_invariants("pool scenario")
+    payout = m.claim("diamond")
+    print(f"  +{MIN_CLAIM_DELAY_SLOTS} slots diamond claims {payout:,} lamports")
+    m.assert_invariants("donate/claim scenario")
 
 
 def scenario_sharding() -> None:
-    rule("4. Sharding across wallets never out-earns holding in one")
+    rule("3. Sharding across wallets never out-earns holding in one")
+    held = TENURE_TIER_SECONDS[1]
 
     def run(wallets: int, each: int) -> int:
-        m = Market.launch(CURVE, vest_duration_seconds=0)
+        m = Market.register()
         for i in range(wallets):
-            m.buy(f"w{i}", each)
-        m.buy("flipper", 100_000_000)
-        m.advance(10)
+            w = f"w{i}"
+            m.write_registration(w)
+            m.set_balance(w, each)
+        m.advance(seconds=held)
         for i in range(wallets):
-            m.claim_vested(f"w{i}")
-        m.claim_vested("flipper")
-        m.sell("flipper", 100_000_000)
+            m.sync(f"w{i}")
+        m.donate("creator", 1_000_000)
         return sum(m.claimable(f"w{i}") for i in range(wallets))
 
     whole = run(1, 4_000_000)
@@ -118,67 +90,40 @@ def scenario_sharding() -> None:
         verdict = "no gain" if total <= whole else "!! EXPLOIT !!"
         print(f"  {shards:>2} wallet(s) x {4_000_000 // shards:>9,} -> {total:>12,}  ({verdict})")
     print(f"   1 wallet  x {4_000_000:>9,} -> {whole:>12,}  (baseline)")
-    print("  Weight is capital x tenure_multiplier(age) and counts no wallets,")
+    print("  Weight is balance x tenure_multiplier(age) with no per-wallet bonus,")
     print("  so splitting is exactly neutral before rounding, and rounding")
     print("  always favours the pool.")
 
 
-def scenario_reputation() -> None:
-    rule("5. Reputation: earned by capital-at-risk x time, diluted by sharding")
+def scenario_flash_loan_guard() -> None:
+    rule("4. A same-block balance increase cannot capture a fee it did not earn")
+    m = Market.register()
+    m.write_registration("victim")
+    m.set_balance("victim", 1_000)
+    m.sync("victim")
+    m.donate("creator", 10_000)
 
-    whole = Market.launch(CURVE, vest_duration_seconds=7 * DAY)
-    whole.buy("whale", 100_000_000_000_000)
-    whole.advance(8 * DAY)
-    whole.claim_vested("whale")
-    whole.update_reputation("whale")
-    rep = whole.reputation("whale")
-    capital = whole.position("whale").cost_basis_lamports
-    print(f"  one wallet: {sol(capital)} held 8 days")
-    print(f"     score {rep.score:,}  tier {rep.tier} ({TIER_NAMES[rep.tier]})")
+    m.write_registration("attacker")
+    m.set_balance("attacker", 1_000_000)
+    m.sync("attacker")  # same-slot balance increase
 
-    shards = Market.launch(CURVE, vest_duration_seconds=7 * DAY)
-    for i in range(4):
-        shards.buy(f"shard{i}", 25_000_000_000_000)
-    shards.advance(8 * DAY)
-    total = 0
-    for i in range(4):
-        shards.claim_vested(f"shard{i}")
-        shards.update_reputation(f"shard{i}")
-        total += shards.reputation(f"shard{i}").score
-    tier = shards.reputation("shard0").tier
-    print(f"  four wallets, same capital and time:")
-    print(f"     score {total:,} across all four, but each one is tier {tier} "
-          f"({TIER_NAMES[tier]})")
-    print("  Total score is flat; per-wallet tier strictly drops. Tiers are")
-    print("  thresholds on one wallet's score, so sharding is a pure loss.")
+    try:
+        m.claim("attacker")
+    except StackError as exc:
+        print(f"  attacker buys in and claims in the same slot -> rejected ({exc})")
 
-
-def scenario_curve() -> None:
-    rule("6. The bonding curve stays solvent")
-    m = Market.launch(CURVE, vest_duration_seconds=0)
-    print(f"  launch spot price: {m.spot_price()} lamports/token")
-    for wallet, amount in [("a", 50_000_000_000_000), ("b", 50_000_000_000_000)]:
-        cost = m.buy(wallet, amount)
-        print(f"  {wallet} buys {amount:>18,} for {sol(cost)}  "
-              f"-> spot {m.spot_price()} lamports")
-    m.claim_vested("a")
-    out = m.sell("a", 50_000_000_000_000)
-    proceeds = getattr(out, "proceeds_lamports", 0)
-    print(f"  a sells it all back            for {sol(proceeds)} "
-          f"(tax {out.tax:,} tokens to the pool)")
-    print(f"  curve vault: {sol(m.vault_lamports)}  (never negative)")
-    m.assert_invariants("curve scenario")
+    m.advance(slots=MIN_CLAIM_DELAY_SLOTS)
+    print(f"  attacker's claimable after waiting it out: {m.claimable('attacker'):,}")
+    print("  (zero - the fee landed before the attacker had any weight at all)")
 
 
 def main() -> None:
-    print("StackApp - devnet prototype mechanics walk-through")
+    print("StackApp - pump.fun loyalty layer mechanics walk-through")
     print("(simulation only; no network, no keys, no funds)")
-    scenario_fifo()
-    scenario_transfer()
-    scenario_pool()
+    scenario_registration_and_tenure()
+    scenario_donate_and_claim()
     scenario_sharding()
-    scenario_reputation()
-    scenario_curve()
+    scenario_flash_loan_guard()
     print()
     print("All invariants held.")
 

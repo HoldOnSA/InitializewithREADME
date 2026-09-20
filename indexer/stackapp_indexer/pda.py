@@ -14,10 +14,10 @@ from typing import Sequence, Tuple
 from .borsh import b58decode, b58encode
 from stackapp_sim.constants import (
     SEED_CONFIG,
-    SEED_CURVE_VAULT,
+    SEED_DEPOSIT_VAULT,
+    SEED_GLOBAL_CONFIG,
     SEED_POOL,
-    SEED_POSITION,
-    SEED_REPUTATION,
+    SEED_REGISTRATION,
 )
 
 _P = 2**255 - 19
@@ -81,6 +81,10 @@ def find_program_address(seeds: Sequence[bytes], program_id: str) -> Tuple[str, 
 # -- the program's own PDAs -------------------------------------------------
 
 
+def global_config_pda(program_id: str) -> Tuple[str, int]:
+    return find_program_address([SEED_GLOBAL_CONFIG], program_id)
+
+
 def token_config_pda(mint: str, program_id: str) -> Tuple[str, int]:
     return find_program_address([SEED_CONFIG, b58decode(mint)], program_id)
 
@@ -89,28 +93,24 @@ def loyalty_pool_pda(mint: str, program_id: str) -> Tuple[str, int]:
     return find_program_address([SEED_POOL, b58decode(mint)], program_id)
 
 
-def position_pda(mint: str, owner: str, program_id: str) -> Tuple[str, int]:
+def deposit_vault_pda(mint: str, program_id: str) -> Tuple[str, int]:
+    return find_program_address([SEED_DEPOSIT_VAULT, b58decode(mint)], program_id)
+
+
+def registration_pda(mint: str, owner: str, program_id: str) -> Tuple[str, int]:
     return find_program_address(
-        [SEED_POSITION, b58decode(mint), b58decode(owner)], program_id
+        [SEED_REGISTRATION, b58decode(mint), b58decode(owner)], program_id
     )
-
-
-def reputation_pda(owner: str, program_id: str) -> Tuple[str, int]:
-    return find_program_address([SEED_REPUTATION, b58decode(owner)], program_id)
-
-
-def curve_vault_pda(mint: str, program_id: str) -> Tuple[str, int]:
-    return find_program_address([SEED_CURVE_VAULT, b58decode(mint)], program_id)
 
 
 __all__ = [
     "is_on_curve",
     "create_program_address",
     "find_program_address",
+    "global_config_pda",
     "token_config_pda",
     "loyalty_pool_pda",
-    "position_pda",
-    "reputation_pda",
-    "curve_vault_pda",
+    "deposit_vault_pda",
+    "registration_pda",
     "PdaError",
 ]

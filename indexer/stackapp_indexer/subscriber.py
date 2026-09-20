@@ -1,12 +1,22 @@
 """The devnet subscription loop.
 
-Two sources feed the store:
+Three sources feed the store:
 
-* `logsSubscribe` mentioning the program - the event stream (buys, sells, tax,
-  claims, tier-ups). Low latency, but logs can be dropped on reconnect.
+* `logsSubscribe` mentioning the program - the event stream (registrations,
+  syncs, fee collections, claims). Low latency, but logs can be dropped on
+  reconnect.
 * `programSubscribe` plus a periodic `getProgramAccounts` sweep - the account
-  state (TokenConfig, Position, LoyaltyPool, Reputation). This is the
-  authoritative view and it backfills anything the log stream missed.
+  state (GlobalConfig, TokenConfig, DepositVault, Registration, LoyaltyPool).
+  This is the authoritative view and it backfills anything the log stream
+  missed.
+* A periodic sweep of every known `DepositVault` address for marker-transfer
+  *candidates* - plain SOL transfers that never mention the program at all
+  (there is no program interaction in sending a marker; see
+  `constants.py`'s `REGISTRATION_MARKER_LAMPORTS` doc), so `logsSubscribe`
+  can never see them. This never writes a `Registration` itself - it only
+  queues a `PendingRegistration` for the operator (holding
+  `GlobalConfig.authority`) to review and sign `write_registration` for,
+  same as any other wallet-signed action here. See `SECURITY_NOTES.md`.
 
 RPC is spoken as plain JSON-RPC over `websockets` / `httpx`. That keeps the
 dependency surface small and means the wire format is visible in this file
@@ -20,7 +30,9 @@ import base64
 import contextlib
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+
+from stackapp_sim.constants import REGISTRATION_MARKER_LAMPORTS
 
 from .config import Settings
 from .layouts import decode_account, parse_program_data_lines
@@ -37,6 +49,9 @@ class Subscriber:
         self._request_id = 0
         self.connected = False
         self.last_error: Optional[str] = None
+        # Signatures already inspected for a marker transfer, per vault, so a
+        # sweep never re-fetches a transaction it has already judged.
+        self._seen_marker_signatures: Dict[str, Set[str]] = {}
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -112,6 +127,7 @@ class Subscriber:
 
             # A backfill on (re)connect closes whatever gap the outage left.
             await self.refresh_accounts()
+            await self.refresh_marker_candidates()
 
             async for raw in ws:
                 try:
@@ -155,7 +171,9 @@ class Subscriber:
             return
         decoded = decode_account(raw)
         if decoded is not None:
-            self.store.apply_account(decoded["name"], decoded["data"], address, slot)
+            self.store.apply_account(
+                decoded["name"], decoded["data"], address, slot, lamports=account.get("lamports", 0)
+            )
 
     # -- periodic account sweep --------------------------------------------
 
@@ -164,33 +182,30 @@ class Subscriber:
             await asyncio.sleep(self.settings.refresh_interval)
             try:
                 await self.refresh_accounts()
+                await self.refresh_marker_candidates()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("account refresh failed: %s", exc)
 
-    async def refresh_accounts(self) -> int:
-        """Full `getProgramAccounts` sweep. Returns how many were decoded."""
+    async def _rpc(self, method: str, params: list) -> Any:
         import httpx
 
-        payload = {
-            "jsonrpc": "2.0",
-            "id": self._next_id(),
-            "method": "getProgramAccounts",
-            "params": [
-                self.settings.program_id,
-                {"encoding": "base64", "commitment": "confirmed", "withContext": True},
-            ],
-        }
+        payload = {"jsonrpc": "2.0", "id": self._next_id(), "method": method, "params": params}
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(self.settings.rpc_http, json=payload)
             response.raise_for_status()
             body = response.json()
-
         if "error" in body:
-            raise RuntimeError(f"getProgramAccounts failed: {body['error']}")
+            raise RuntimeError(f"{method} failed: {body['error']}")
+        return body.get("result")
 
-        result = body.get("result", {})
+    async def refresh_accounts(self) -> int:
+        """Full `getProgramAccounts` sweep. Returns how many were decoded."""
+        result = await self._rpc(
+            "getProgramAccounts",
+            [self.settings.program_id, {"encoding": "base64", "commitment": "confirmed", "withContext": True}],
+        )
         context = result.get("context", {}) if isinstance(result, dict) else {}
         slot = context.get("slot", 0)
         accounts = result.get("value", result) if isinstance(result, dict) else result
@@ -201,6 +216,64 @@ class Subscriber:
             count += 1
         log.info("refreshed %d program accounts at slot %s", count, slot)
         return count
+
+    # -- marker-transfer candidates ------------------------------------------
+
+    async def refresh_marker_candidates(self) -> int:
+        """Look for plain SOL transfers into each known `DepositVault` that
+        match `REGISTRATION_MARKER_LAMPORTS` exactly, and queue them as
+        `PendingRegistration`s. Returns how many new candidates were found.
+
+        This is a heuristic, not a proof: it assumes the marker's sender is
+        the transaction's fee payer (account index 0), which is true for the
+        simple "send SOL from your own wallet" flow the design calls for, but
+        would misattribute a marker relayed through some other fee payer.
+        Either way this only ever *proposes* a registration for a human to
+        approve - see the module docstring.
+        """
+        found = 0
+        for mint, config in list(self.store.configs.items()):
+            vault = config["deposit_vault"]
+            seen = self._seen_marker_signatures.setdefault(vault, set())
+            signatures = await self._rpc(
+                "getSignaturesForAddress", [vault, {"limit": 25, "commitment": "confirmed"}]
+            )
+            for entry in reversed(signatures or []):  # oldest first
+                signature = entry.get("signature")
+                if not signature or signature in seen or entry.get("err"):
+                    continue
+                seen.add(signature)
+                try:
+                    owner, amount, slot = await self._inspect_transfer(vault, signature)
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("could not inspect %s: %s", signature, exc)
+                    continue
+                if owner is not None and amount == REGISTRATION_MARKER_LAMPORTS:
+                    self.store.note_marker_candidate(mint, owner, amount, slot, signature)
+                    found += 1
+        return found
+
+    async def _inspect_transfer(self, vault: str, signature: str):
+        tx = await self._rpc(
+            "getTransaction",
+            [signature, {"encoding": "json", "commitment": "confirmed", "maxSupportedTransactionVersion": 0}],
+        )
+        if tx is None:
+            return None, 0, 0
+        message = tx["transaction"]["message"]
+        keys = message.get("accountKeys", [])
+        meta = tx.get("meta") or {}
+        pre = meta.get("preBalances", [])
+        post = meta.get("postBalances", [])
+        if vault not in keys or not pre or not post:
+            return None, 0, 0
+        idx = keys.index(vault)
+        delta = post[idx] - pre[idx]
+        slot = tx.get("slot", 0)
+        # The fee payer (account 0) is the sender for the plain, single-wallet
+        # transfer the marker flow calls for.
+        sender = keys[0] if keys else None
+        return sender, delta, slot
 
     def health(self) -> Dict[str, Any]:
         return {

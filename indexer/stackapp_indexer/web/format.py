@@ -8,7 +8,7 @@ testable - see `tests/test_web.py`.
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 LAMPORTS_PER_SOL = 1_000_000_000
 
@@ -106,45 +106,6 @@ def price(lamports_per_token: Any) -> str:
     if value >= LAMPORTS_PER_SOL // 1_000:
         return f"{value / LAMPORTS_PER_SOL:.6f} SOL"
     return f"{value:,} lamports"
-
-
-def tax_curve_chart(points: Sequence[Dict[str, int]], chart_id: str = "c") -> Optional[dict]:
-    """Precompute the SVG paths for a step chart of tax against time held.
-
-    Returns None for an empty curve. Coordinates are in a 320x96 viewBox.
-    """
-    if not points:
-        return None
-
-    width, height, pad = 320.0, 96.0, 4.0
-    span = max(float(points[-1]["secondsHeld"]) * 1.35, 3_600.0)
-    max_bps = max(max(int(p["taxBps"]) for p in points), 1)
-
-    def x_of(seconds: float) -> float:
-        return min(float(seconds), span) / span * width
-
-    def y_of(tax_bps: int) -> float:
-        return height - (tax_bps / max_bps) * (height - 2 * pad) - pad
-
-    segments: List[str] = []
-    for i, point in enumerate(points):
-        nxt = points[i + 1] if i + 1 < len(points) else None
-        x0 = x_of(point["secondsHeld"])
-        x1 = x_of(nxt["secondsHeld"]) if nxt else width
-        y = y_of(int(point["taxBps"]))
-        segments.append(f"{'M' if i == 0 else 'L'}{x0:.1f},{y:.1f}")
-        segments.append(f"L{x1:.1f},{y:.1f}")
-        if nxt:  # the vertical drop to the next tier
-            segments.append(f"L{x1:.1f},{y_of(int(nxt['taxBps'])):.1f}")
-
-    line = " ".join(segments)
-    return {
-        "id": chart_id,
-        "line": line,
-        "fill": f"{line} L{width:.0f},{height:.0f} L0,{height:.0f} Z",
-        "mid_label": duration(int(span // 2)),
-        "end_label": duration(int(span)),
-    }
 
 
 FILTERS = {

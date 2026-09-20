@@ -32,64 +32,37 @@ def discriminator(namespace: str, name: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# Shared sub-structs
-# ---------------------------------------------------------------------------
-
-TAX_POINT: Layout = [
-    ("seconds_held", "i64"),
-    ("tax_bps", "u16"),
-]
-
-LOT: Layout = [
-    ("original", "u64"),
-    ("cum_released", "u64"),
-    ("released", "u64"),
-    ("buy_timestamp", "i64"),
-]
-
-# ---------------------------------------------------------------------------
 # Accounts
 # ---------------------------------------------------------------------------
+
+GLOBAL_CONFIG: Layout = [
+    ("authority", "pubkey"),
+    ("bump", "u8"),
+]
 
 TOKEN_CONFIG: Layout = [
     ("mint", "pubkey"),
     ("creator", "pubkey"),
-    ("launch_timestamp", "i64"),
-    ("vest_duration_seconds", "i64"),
-    ("pool_account", "pubkey"),
-    ("curve_vault", "pubkey"),
-    ("tax_curve", ("vec", ("struct", TAX_POINT))),
-    ("virtual_sol_reserves", "u64"),
-    ("virtual_token_reserves", "u64"),
-    ("real_sol_reserves", "u64"),
-    ("tokens_sold", "u64"),
-    ("total_buy_volume_tokens", "u64"),
-    ("total_sell_volume_tokens", "u64"),
-    ("holder_count", "u32"),
-    ("decimals", "u8"),
+    ("registered_at", "i64"),
+    ("deposit_vault", "pubkey"),
+    ("deposit_bump", "u8"),
     ("bump", "u8"),
-    ("curve_vault_bump", "u8"),
 ]
 
-POSITION: Layout = [
+DEPOSIT_VAULT: Layout = [
+    ("mint", "pubkey"),
+    ("bump", "u8"),
+]
+
+REGISTRATION: Layout = [
     ("owner", "pubkey"),
     ("mint", "pubkey"),
-    ("lots", ("vec", ("struct", LOT))),
-    ("vested_claimed", "u64"),
-    ("spendable", "u64"),
+    ("registered_at", "i64"),
     ("weighted_shares", "u64"),
     ("reward_checkpoint", "u128"),
     ("pending_rewards", "u64"),
     ("lifetime_rewards_claimed", "u64"),
-    ("last_increase_slot", "u64"),
-    ("cost_basis_lamports", "u64"),
-    ("total_bought", "u64"),
-    ("total_sold", "u64"),
-    ("first_buy_timestamp", "i64"),
-    ("tenure_weighted_volume", "u128"),
-    ("credited_volume", "u128"),
-    ("last_reputation_timestamp", "i64"),
-    ("maturity_credits", "u32"),
+    ("last_sync_slot", "u64"),
     ("bump", "u8"),
 ]
 
@@ -103,92 +76,52 @@ LOYALTY_POOL: Layout = [
     ("bump", "u8"),
 ]
 
-REPUTATION: Layout = [
-    ("owner", "pubkey"),
-    ("score", "u128"),
-    ("tier", "u8"),
-    ("tokens_held_to_maturity", "u32"),
-    ("total_tenure_weighted_volume", "u128"),
-    ("first_seen_timestamp", "i64"),
-    ("last_update_timestamp", "i64"),
-    ("bump", "u8"),
-]
-
-CURVE_VAULT: Layout = [
-    ("mint", "pubkey"),
-    ("bump", "u8"),
-]
-
 ACCOUNT_LAYOUTS: Dict[str, Layout] = {
+    "GlobalConfig": GLOBAL_CONFIG,
     "TokenConfig": TOKEN_CONFIG,
-    "Position": POSITION,
+    "DepositVault": DEPOSIT_VAULT,
+    "Registration": REGISTRATION,
     "LoyaltyPool": LOYALTY_POOL,
-    "Reputation": REPUTATION,
-    "CurveVault": CURVE_VAULT,
 }
 
 # ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
 
-LAUNCH_INITIALIZED: Layout = [
+MINT_REGISTERED: Layout = [
     ("mint", "pubkey"),
     ("creator", "pubkey"),
-    ("launch_timestamp", "i64"),
-    ("vest_duration_seconds", "i64"),
-    ("virtual_sol_reserves", "u64"),
-    ("virtual_token_reserves", "u64"),
-    ("tax_curve_points", "u8"),
-    ("opening_tax_bps", "u16"),
-    ("floor_tax_bps", "u16"),
+    ("deposit_vault", "pubkey"),
+    ("registered_at", "i64"),
 ]
 
-BUY_EXECUTED: Layout = [
-    ("mint", "pubkey"),
-    ("buyer", "pubkey"),
-    ("amount", "u64"),
-    ("cost_lamports", "u64"),
-    ("timestamp", "i64"),
-    ("slot", "u64"),
-    ("position_total", "u64"),
-    ("spot_price_lamports", "u64"),
-    ("tokens_sold", "u64"),
-]
-
-VESTED_CLAIMED: Layout = [
+WALLET_REGISTERED: Layout = [
     ("mint", "pubkey"),
     ("owner", "pubkey"),
-    ("released", "u64"),
-    ("spendable_total", "u64"),
-    ("locked_total", "u64"),
-    ("timestamp", "i64"),
+    ("registered_at", "i64"),
 ]
 
-EXIT_EXECUTED: Layout = [
+WEIGHT_SYNCED: Layout = [
     ("mint", "pubkey"),
     ("owner", "pubkey"),
-    ("kind", "u8"),
-    ("gross", "u64"),
-    ("tax", "u64"),
-    ("net", "u64"),
-    ("top_tax_bps", "u16"),
-    ("proceeds_lamports", "u64"),
-    ("destination", "pubkey"),
+    ("balance", "u64"),
+    ("previous_weight", "u64"),
+    ("new_weight", "u64"),
+    ("total_weighted_shares", "u64"),
     ("timestamp", "i64"),
 ]
 
-TAX_COLLECTED: Layout = [
+FEE_COLLECTED: Layout = [
     ("mint", "pubkey"),
-    ("payer", "pubkey"),
     ("amount", "u64"),
     ("acc_reward_per_share", "u128"),
     ("total_weighted_shares", "u64"),
-    ("pool_total_collected", "u64"),
+    ("total_collected", "u64"),
     ("undistributed", "u64"),
     ("timestamp", "i64"),
 ]
 
-POOL_CLAIMED: Layout = [
+REWARD_CLAIMED: Layout = [
     ("mint", "pubkey"),
     ("owner", "pubkey"),
     ("amount", "u64"),
@@ -197,58 +130,13 @@ POOL_CLAIMED: Layout = [
     ("timestamp", "i64"),
 ]
 
-WEIGHT_SYNCED: Layout = [
-    ("mint", "pubkey"),
-    ("owner", "pubkey"),
-    ("previous_weight", "u64"),
-    ("new_weight", "u64"),
-    ("total_weighted_shares", "u64"),
-    ("timestamp", "i64"),
-]
-
-REPUTATION_UPDATED: Layout = [
-    ("owner", "pubkey"),
-    ("mint", "pubkey"),
-    ("score_delta", "u128"),
-    ("score", "u128"),
-    ("tier", "u8"),
-    ("tokens_held_to_maturity", "u32"),
-    ("total_tenure_weighted_volume", "u128"),
-    ("capital_at_risk_lamports", "u64"),
-    ("window_seconds", "i64"),
-    ("timestamp", "i64"),
-]
-
-TIER_UP: Layout = [
-    ("owner", "pubkey"),
-    ("previous_tier", "u8"),
-    ("new_tier", "u8"),
-    ("score", "u128"),
-    ("timestamp", "i64"),
-]
-
-LOTS_COMPACTED: Layout = [
-    ("mint", "pubkey"),
-    ("owner", "pubkey"),
-    ("lots_remaining", "u8"),
-    ("merged_timestamp", "i64"),
-]
-
 EVENT_LAYOUTS: Dict[str, Layout] = {
-    "LaunchInitialized": LAUNCH_INITIALIZED,
-    "BuyExecuted": BUY_EXECUTED,
-    "VestedClaimed": VESTED_CLAIMED,
-    "ExitExecuted": EXIT_EXECUTED,
-    "TaxCollected": TAX_COLLECTED,
-    "PoolClaimed": POOL_CLAIMED,
+    "MintRegistered": MINT_REGISTERED,
+    "WalletRegistered": WALLET_REGISTERED,
     "WeightSynced": WEIGHT_SYNCED,
-    "ReputationUpdated": REPUTATION_UPDATED,
-    "TierUp": TIER_UP,
-    "LotsCompacted": LOTS_COMPACTED,
+    "FeeCollected": FEE_COLLECTED,
+    "RewardClaimed": REWARD_CLAIMED,
 }
-
-# `ExitExecuted.kind` values, mirroring events.rs.
-EXIT_KINDS = {0: "sell", 1: "transfer", 2: "donate"}
 
 EVENT_BY_DISCRIMINATOR: Dict[bytes, str] = {
     discriminator("event", name): name for name in EVENT_LAYOUTS
@@ -265,10 +153,7 @@ def decode_event(payload: bytes) -> Optional[Dict[str, Any]]:
     name = EVENT_BY_DISCRIMINATOR.get(payload[:DISCRIMINATOR_LEN])
     if name is None:
         return None
-    data = decode_struct(EVENT_LAYOUTS[name], payload, DISCRIMINATOR_LEN)
-    if name == "ExitExecuted":
-        data["kind_name"] = EXIT_KINDS.get(data["kind"], "unknown")
-    return {"name": name, "data": data}
+    return {"name": name, "data": decode_struct(EVENT_LAYOUTS[name], payload, DISCRIMINATOR_LEN)}
 
 
 def decode_account(data: bytes) -> Optional[Dict[str, Any]]:
@@ -360,7 +245,6 @@ def parse_program_data_lines(logs: Sequence[str]) -> List[Dict[str, Any]]:
 __all__ = [
     "ACCOUNT_LAYOUTS",
     "EVENT_LAYOUTS",
-    "EXIT_KINDS",
     "decode_account",
     "decode_event",
     "encode_account",

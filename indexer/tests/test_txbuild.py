@@ -10,6 +10,7 @@ import pathlib
 import re
 import unittest
 
+from stackapp_indexer.ata import TOKEN_PROGRAM_ID
 from stackapp_indexer.borsh import b58decode, b58encode
 from stackapp_indexer.layouts import discriminator
 from stackapp_indexer import txbuild
@@ -28,6 +29,7 @@ INSTRUCTIONS_DIR = REPO / "programs" / "stackapp" / "src" / "instructions"
 PROGRAM_ID = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
 SYSTEM = "11111111111111111111111111111111"
 BLOCKHASH = "EETubP5AKHgjPAhzPAFcb8BAY1hMH639CWCFTqi3hq1k"
+
 
 # Deterministic stand-in addresses.
 def key(label: str) -> str:
@@ -162,25 +164,21 @@ class TestMessage(unittest.TestCase):
         return keys
 
 
-class TestInstructionBuilders(unittest.TestCase):
-    def all_instructions(self):
-        return {
-            "initialize_launch": txbuild.initialize_launch(
-                PROGRAM_ID, ALICE, MINT, [(0, 3_000), (3_600, 1_000)], 604_800
-            ),
-            "buy": txbuild.buy(PROGRAM_ID, ALICE, MINT, 1_000),
-            "claim_vested": txbuild.claim_vested(PROGRAM_ID, ALICE, MINT),
-            "sell": txbuild.sell(PROGRAM_ID, ALICE, MINT, 1_000),
-            "transfer_position": txbuild.transfer_position(PROGRAM_ID, ALICE, BOB, MINT, 1_000),
-            "donate_to_pool": txbuild.donate_to_pool(PROGRAM_ID, ALICE, MINT, 1_000),
-            "claim_pool_share": txbuild.claim_pool_share(PROGRAM_ID, ALICE, MINT),
-            "update_reputation": txbuild.update_reputation(PROGRAM_ID, ALICE, MINT),
-            "sync_weight": txbuild.sync_weight(PROGRAM_ID, BOB, ALICE, MINT),
-            "compact_lots": txbuild.compact_lots(PROGRAM_ID, ALICE, MINT),
-        }
+def all_instructions():
+    return {
+        "initialize_config": txbuild.initialize_config(PROGRAM_ID, ALICE, BOB),
+        "update_authority": txbuild.update_authority(PROGRAM_ID, ALICE, BOB),
+        "register_mint": txbuild.register_mint(PROGRAM_ID, ALICE, MINT, BOB),
+        "write_registration": txbuild.write_registration(PROGRAM_ID, ALICE, BOB, MINT),
+        "sync": txbuild.sync(PROGRAM_ID, ALICE, BOB, MINT, TOKEN_PROGRAM_ID),
+        "claim": txbuild.claim(PROGRAM_ID, ALICE, MINT, TOKEN_PROGRAM_ID),
+        "donate": txbuild.donate(PROGRAM_ID, ALICE, MINT, 1_000),
+    }
 
+
+class TestInstructionBuilders(unittest.TestCase):
     def test_every_instruction_carries_its_anchor_discriminator(self):
-        for name, instruction in self.all_instructions().items():
+        for name, instruction in all_instructions().items():
             with self.subTest(instruction=name):
                 self.assertEqual(
                     instruction.data[:8],
@@ -193,43 +191,41 @@ class TestInstructionBuilders(unittest.TestCase):
         declared = set(re.findall(r"pub fn (\w+)\s*\(\s*ctx:", lib_rs))
         self.assertEqual(set(txbuild.BUILDERS), declared)
 
-    def test_argument_encoding(self):
-        instruction = txbuild.buy(PROGRAM_ID, ALICE, MINT, 1_000, 500)
+    def test_donate_argument_encoding(self):
+        instruction = txbuild.donate(PROGRAM_ID, ALICE, MINT, 1_000)
         body = instruction.data[8:]
-        self.assertEqual(len(body), 16, "two u64 arguments")
-        self.assertEqual(int.from_bytes(body[:8], "little"), 1_000)
-        self.assertEqual(int.from_bytes(body[8:], "little"), 500)
+        self.assertEqual(len(body), 8, "one u64 argument")
+        self.assertEqual(int.from_bytes(body, "little"), 1_000)
 
-    def test_tax_curve_encoding(self):
-        instruction = txbuild.initialize_launch(
-            PROGRAM_ID, ALICE, MINT, [(0, 3_000), (3_600, 1_000)], 604_800
-        )
+    def test_pubkey_argument_encoding(self):
+        instruction = txbuild.update_authority(PROGRAM_ID, ALICE, BOB)
         body = instruction.data[8:]
-        self.assertEqual(int.from_bytes(body[:4], "little"), 2, "vec length prefix")
-        self.assertEqual(int.from_bytes(body[4:12], "little", signed=True), 0)
-        self.assertEqual(int.from_bytes(body[12:14], "little"), 3_000)
-        self.assertEqual(int.from_bytes(body[14:22], "little", signed=True), 3_600)
-        self.assertEqual(int.from_bytes(body[22:24], "little"), 1_000)
+        self.assertEqual(len(body), 32)
+        self.assertEqual(b58encode(body), BOB)
 
-    def test_position_pdas_differ_per_wallet(self):
-        mine = txbuild.buy(PROGRAM_ID, ALICE, MINT, 1)
-        theirs = txbuild.buy(PROGRAM_ID, BOB, MINT, 1)
+    def test_registration_pdas_differ_per_wallet(self):
+        # accounts: owner, mint, token_config, loyalty_pool, registration, ...
+        mine = txbuild.claim(PROGRAM_ID, ALICE, MINT, TOKEN_PROGRAM_ID)
+        theirs = txbuild.claim(PROGRAM_ID, BOB, MINT, TOKEN_PROGRAM_ID)
         self.assertNotEqual(mine.accounts[4].pubkey, theirs.accounts[4].pubkey)
 
-    def test_transfer_carries_both_positions(self):
-        instruction = txbuild.transfer_position(PROGRAM_ID, ALICE, BOB, MINT, 1)
-        from_position = instruction.accounts[5].pubkey
-        to_position = instruction.accounts[6].pubkey
-        self.assertNotEqual(from_position, to_position)
-        self.assertTrue(instruction.accounts[5].is_writable)
-        self.assertTrue(instruction.accounts[6].is_writable)
+    def test_ata_differs_per_token_program(self):
+        from stackapp_indexer.ata import TOKEN_2022_PROGRAM_ID
+
+        legacy = txbuild.claim(PROGRAM_ID, ALICE, MINT, TOKEN_PROGRAM_ID)
+        token2022 = txbuild.claim(PROGRAM_ID, ALICE, MINT, TOKEN_2022_PROGRAM_ID)
+        self.assertNotEqual(
+            legacy.accounts[-1].pubkey,
+            token2022.accounts[-1].pubkey,
+            "the ATA must be derived under the mint's real owning program",
+        )
 
     def test_every_instruction_builds_a_valid_message(self):
-        for name, instruction in self.all_instructions().items():
+        for name, instruction in all_instructions().items():
             with self.subTest(instruction=name):
                 payer = instruction.accounts[0].pubkey
                 message = build_message(payer, [instruction], BLOCKHASH)
-                self.assertGreater(len(message), 100)
+                self.assertGreater(len(message), 40)
                 self.assertEqual(message[0], 1, "only the wallet signs")
 
 
@@ -260,7 +256,6 @@ class TestRustParity(unittest.TestCase):
             line = raw_line.strip()
             if line.startswith("#[account("):
                 pending_attr = line
-                # attribute may span several lines
                 if not line.endswith(")]"):
                     pending_attr = line
                 continue
@@ -282,18 +277,13 @@ class TestRustParity(unittest.TestCase):
 
     def test_account_shape_matches_rust(self):
         cases = {
-            "initialize_launch": txbuild.initialize_launch(
-                PROGRAM_ID, ALICE, MINT, [(0, 100)], 0
-            ),
-            "buy": txbuild.buy(PROGRAM_ID, ALICE, MINT, 1),
-            "claim_vested": txbuild.claim_vested(PROGRAM_ID, ALICE, MINT),
-            "sell": txbuild.sell(PROGRAM_ID, ALICE, MINT, 1),
-            "transfer_position": txbuild.transfer_position(PROGRAM_ID, ALICE, BOB, MINT, 1),
-            "donate_to_pool": txbuild.donate_to_pool(PROGRAM_ID, ALICE, MINT, 1),
-            "claim_pool_share": txbuild.claim_pool_share(PROGRAM_ID, ALICE, MINT),
-            "update_reputation": txbuild.update_reputation(PROGRAM_ID, ALICE, MINT),
-            "sync_weight": txbuild.sync_weight(PROGRAM_ID, BOB, ALICE, MINT),
-            "compact_lots": txbuild.compact_lots(PROGRAM_ID, ALICE, MINT),
+            "initialize_config": txbuild.initialize_config(PROGRAM_ID, ALICE, BOB),
+            "update_authority": txbuild.update_authority(PROGRAM_ID, ALICE, BOB),
+            "register_mint": txbuild.register_mint(PROGRAM_ID, ALICE, MINT, BOB),
+            "write_registration": txbuild.write_registration(PROGRAM_ID, ALICE, BOB, MINT),
+            "sync": txbuild.sync(PROGRAM_ID, ALICE, BOB, MINT, TOKEN_PROGRAM_ID),
+            "claim": txbuild.claim(PROGRAM_ID, ALICE, MINT, TOKEN_PROGRAM_ID),
+            "donate": txbuild.donate(PROGRAM_ID, ALICE, MINT, 1),
         }
 
         for name, instruction in cases.items():

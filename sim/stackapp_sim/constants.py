@@ -10,48 +10,33 @@ BPS_DENOMINATOR = 10_000
 # Fixed-point scale for LoyaltyPool.acc_reward_per_share (1e12).
 ACC_PRECISION = 1_000_000_000_000
 
-MAX_TAX_CURVE_POINTS = 8
-MAX_LOTS = 24
-MAX_TAX_BPS = 9_000
-
-# Minimum slots between a balance increase and pool-claim eligibility.
+# Minimum number of slots that must elapse between a Registration's last
+# weight *increase* and a claim - the flash-loan / same-block guard.
 MIN_CLAIM_DELAY_SLOTS = 4
 
-MAX_VEST_DURATION_SECONDS = 60 * 60 * 24 * 365 * 2
+# Minimum seconds held for each tenure tier. Deliberately short: real
+# pump.fun token lifespans are usually minutes, not days or weeks.
+TENURE_TIER_SECONDS = (60, 600, 1_800)  # 1 min, 10 min, 30 min
 
-# Fraction of everything ever bought that must still be held to count as
-# "held to maturity".
-MATURITY_MIN_RETENTION_BPS = 5_000
+# Multiplier applied to live balance at each tenure tier, indexed the same
+# way as TENURE_TIER_SECONDS (index 0 is "held less than the first
+# threshold", i.e. the floor).
+TENURE_TIER_MULTIPLIER_BPS = (10_000, 12_500, 15_000, 20_000)  # 1.00x/1.25x/1.50x/2.00x
 
-# lamports * seconds -> score points. 1 SOL for 1 day == 1000 points.
-REP_SCORE_DIVISOR = 86_400_000_000
-
-# (minimum_age_seconds, multiplier_bps), ascending. Bounded at 3x on purpose.
-TENURE_TIERS = (
-    (0, 10_000),          # < 1 day    -> 1.00x
-    (86_400, 12_500),     # >= 1 day   -> 1.25x
-    (604_800, 15_000),    # >= 7 days  -> 1.50x
-    (2_592_000, 20_000),  # >= 30 days -> 2.00x
-    (7_776_000, 30_000),  # >= 90 days -> 3.00x
-)
-
-REPUTATION_TIER_THRESHOLDS = (1_000, 10_000, 50_000, 250_000)
-MAX_REPUTATION_TIER = 4
-
-TIER_NAMES = ("Drifter", "Holder", "Anchor", "Keystone", "Bedrock")
+# The fixed, distinctive marker amount a holder sends from their own wallet
+# to a token's DepositVault to register - a plain SOL transfer, not a
+# program interaction.
+REGISTRATION_MARKER_LAMPORTS = 2_500_000  # 0.0025 SOL
 
 # PDA seeds
+SEED_GLOBAL_CONFIG = b"global_config"
 SEED_CONFIG = b"config"
 SEED_POOL = b"pool"
-SEED_POSITION = b"position"
-SEED_REPUTATION = b"reputation"
-SEED_CURVE_VAULT = b"curve_vault"
-
-# Prototype curve defaults: 30 SOL against ~1.073e9 whole tokens at 6 decimals.
-DEFAULT_VIRTUAL_SOL_RESERVES = 30_000_000_000
-DEFAULT_VIRTUAL_TOKEN_RESERVES = 1_073_000_000_000_000
+SEED_DEPOSIT_VAULT = b"deposit"
+SEED_REGISTRATION = b"registration"
 
 LAMPORTS_PER_SOL = 1_000_000_000
 DAY = 86_400
+MINUTE = 60
 
 U64_MAX = 2**64 - 1

@@ -29,7 +29,7 @@ from stackapp_indexer.pda import (
     create_program_address,
     find_program_address,
     is_on_curve,
-    position_pda,
+    registration_pda,
     token_config_pda,
 )
 from stackapp_indexer.selftest import round_trip_accounts, round_trip_events, sample_struct
@@ -100,10 +100,10 @@ class TestLayouts(unittest.TestCase):
         import hashlib
 
         self.assertEqual(
-            discriminator("event", "BuyExecuted"),
-            hashlib.sha256(b"event:BuyExecuted").digest()[:8],
+            discriminator("event", "RewardClaimed"),
+            hashlib.sha256(b"event:RewardClaimed").digest()[:8],
         )
-        self.assertEqual(len(discriminator("account", "Position")), 8)
+        self.assertEqual(len(discriminator("account", "Registration")), 8)
 
     def test_discriminators_are_unique(self):
         seen = {}
@@ -124,29 +124,25 @@ class TestLayouts(unittest.TestCase):
         self.assertIsNone(decode_account(b"\xff" * 8))
         self.assertIsNone(decode_event(b"\x01\x02"))
 
-    def test_exit_kind_is_named(self):
-        payload = sample_struct(EVENT_LAYOUTS["ExitExecuted"])
-        payload["kind"] = 1
-        decoded = decode_event(encode_event("ExitExecuted", payload))
-        self.assertEqual(decoded["data"]["kind_name"], "transfer")
-
     def test_events_are_pulled_out_of_transaction_logs(self):
-        payload = sample_struct(EVENT_LAYOUTS["TaxCollected"])
-        blob = base64.b64encode(encode_event("TaxCollected", payload)).decode()
+        payload = sample_struct(EVENT_LAYOUTS["FeeCollected"])
+        blob = base64.b64encode(encode_event("FeeCollected", payload)).decode()
         logs = [
             "Program Fg6Paf... invoke [1]",
-            "Program log: Instruction: Sell",
+            "Program log: Instruction: Donate",
             f"Program data: {blob}",
             "Program log: not base64 at all !!!",
             "Program Fg6Paf... success",
         ]
         found = parse_program_data_lines(logs)
         self.assertEqual(len(found), 1)
-        self.assertEqual(found[0]["name"], "TaxCollected")
+        self.assertEqual(found[0]["name"], "FeeCollected")
         self.assertEqual(found[0]["data"]["amount"], payload["amount"])
 
     def test_a_truncated_payload_does_not_crash_the_parser(self):
-        blob = base64.b64encode(encode_event("TierUp", sample_struct(EVENT_LAYOUTS["TierUp"]))[:12])
+        blob = base64.b64encode(
+            encode_event("WeightSynced", sample_struct(EVENT_LAYOUTS["WeightSynced"]))[:12]
+        )
         with self.assertRaises(BorshError):
             decode_event(base64.b64decode(blob))
 
@@ -166,7 +162,7 @@ class TestPda(unittest.TestCase):
         self.assertLessEqual(bump, 255)
 
     def test_derivation_is_deterministic_and_reproducible_from_the_bump(self):
-        seeds = [b"position", b58decode(TOKEN_PROGRAM), b58decode(SYSTEM_PROGRAM)]
+        seeds = [b"registration", b58decode(TOKEN_PROGRAM), b58decode(SYSTEM_PROGRAM)]
         address, bump = find_program_address(seeds, PROGRAM_ID)
         self.assertEqual(find_program_address(seeds, PROGRAM_ID), (address, bump))
         self.assertEqual(create_program_address([*seeds, bytes([bump])], PROGRAM_ID), address)
@@ -176,9 +172,9 @@ class TestPda(unittest.TestCase):
         b, _ = token_config_pda(SYSTEM_PROGRAM, PROGRAM_ID)
         self.assertNotEqual(a, b)
 
-    def test_position_pda_is_bound_to_both_mint_and_owner(self):
-        one, _ = position_pda(TOKEN_PROGRAM, SYSTEM_PROGRAM, PROGRAM_ID)
-        two, _ = position_pda(SYSTEM_PROGRAM, TOKEN_PROGRAM, PROGRAM_ID)
+    def test_registration_pda_is_bound_to_both_mint_and_owner(self):
+        one, _ = registration_pda(TOKEN_PROGRAM, SYSTEM_PROGRAM, PROGRAM_ID)
+        two, _ = registration_pda(SYSTEM_PROGRAM, TOKEN_PROGRAM, PROGRAM_ID)
         self.assertNotEqual(one, two, "swapping mint and owner must not collide")
 
     def test_oversized_seed_is_rejected(self):

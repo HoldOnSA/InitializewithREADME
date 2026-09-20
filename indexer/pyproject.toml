@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stackapp-indexer"
 version = "0.1.0"
-description = "Devnet indexer and web UI for the StackApp launchpad prototype"
+description = "Devnet indexer and web UI for StackApp's pump.fun loyalty layer prototype"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 

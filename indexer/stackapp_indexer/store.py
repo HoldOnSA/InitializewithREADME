@@ -4,9 +4,9 @@ Everything lives in memory: this is a prototype indexer, and a restart simply
 re-subscribes and backfills. Swapping the dicts for Postgres would be a
 contained change - `Store` is the only thing the API layer talks to.
 
-Derived numbers (vesting %, current tax rate, projected claimable share) are
-computed with `stackapp_sim`, the same Python mirror of the on-chain math that
-the test suite uses, so the UI and the program agree by construction.
+Derived numbers (tenure multiplier, projected claimable share) are computed
+with `stackapp_sim`, the same Python mirror of the on-chain math that the
+test suite uses, so the UI and the program agree by construction.
 """
 
 from __future__ import annotations
@@ -17,17 +17,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, Iterable, List, Optional, Set, Tuple
 
-from stackapp_sim.constants import MIN_CLAIM_DELAY_SLOTS, TIER_NAMES
-from stackapp_sim.math import (
-    distribute,
-    pending,
-    spot_price_lamports,
-    tax_bps_for_age,
-    tenure_multiplier_bps,
-    tier_for_score,
-    vested_amount,
-    vested_bps,
-)
+from stackapp_sim.constants import MIN_CLAIM_DELAY_SLOTS, REGISTRATION_MARKER_LAMPORTS
+from stackapp_sim.math import distribute, pending, tenure_multiplier_bps
 
 MAX_FEED_EVENTS = 5_000
 
@@ -51,12 +42,42 @@ class FeedEvent:
 
 
 @dataclass
+class PendingRegistration:
+    """A marker-transfer candidate the indexer noticed but hasn't been
+    written on chain yet - the operator (holding `GlobalConfig.authority`)
+    reviews and signs `write_registration` for these, they are never
+    auto-signed. See `SECURITY_NOTES.md`."""
+
+    mint: str
+    owner: str
+    amount: int
+    slot: int
+    signature: str
+    detected_at: float
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "mint": self.mint,
+            "owner": self.owner,
+            "amount": self.amount,
+            "slot": self.slot,
+            "signature": self.signature,
+            "detectedAt": self.detected_at,
+        }
+
+
+@dataclass
 class Store:
+    global_config: Optional[Dict[str, Any]] = None
     configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     pools: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    vault_lamports: Dict[str, int] = field(default_factory=dict)  # by mint
     # keyed by (mint, owner)
-    positions: Dict[Tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
-    reputations: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    registrations: Dict[Tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
+
+    # Marker-transfer candidates awaiting a human `write_registration`,
+    # keyed by (mint, owner) so a repeat marker doesn't queue twice.
+    pending_registrations: Dict[Tuple[str, str], PendingRegistration] = field(default_factory=dict)
 
     feed: Deque[FeedEvent] = field(default_factory=lambda: deque(maxlen=MAX_FEED_EVENTS))
     subscribers: Set["asyncio.Queue[Dict[str, Any]]"] = field(default_factory=set)
@@ -66,21 +87,46 @@ class Store:
 
     # -- ingestion ----------------------------------------------------------
 
-    def apply_account(self, name: str, data: Dict[str, Any], address: str, slot: int) -> None:
+    def apply_account(
+        self, name: str, data: Dict[str, Any], address: str, slot: int, lamports: int = 0
+    ) -> None:
         """Upsert a decoded program account."""
         self.current_slot = max(self.current_slot, slot)
         record = dict(data)
         record["_address"] = address
         record["_slot"] = slot
 
-        if name == "TokenConfig":
+        if name == "GlobalConfig":
+            self.global_config = record
+        elif name == "TokenConfig":
             self.configs[data["mint"]] = record
         elif name == "LoyaltyPool":
             self.pools[data["mint"]] = record
-        elif name == "Position":
-            self.positions[(data["mint"], data["owner"])] = record
-        elif name == "Reputation":
-            self.reputations[data["owner"]] = record
+        elif name == "DepositVault":
+            self.vault_lamports[data["mint"]] = lamports
+        elif name == "Registration":
+            key = (data["mint"], data["owner"])
+            self.registrations[key] = record
+            # A written registration retires any matching candidate.
+            self.pending_registrations.pop(key, None)
+
+    def note_marker_candidate(
+        self, mint: str, owner: str, amount: int, slot: int, signature: str
+    ) -> None:
+        """Record a plain SOL transfer into a token's DepositVault that
+        matches `REGISTRATION_MARKER_LAMPORTS`. Only a candidate - see
+        `PendingRegistration`."""
+        key = (mint, owner)
+        if key in self.registrations:
+            return  # already written
+        self.pending_registrations[key] = PendingRegistration(
+            mint=mint,
+            owner=owner,
+            amount=amount,
+            slot=slot,
+            signature=signature,
+            detected_at=time.time(),
+        )
 
     def apply_event(
         self, name: str, data: Dict[str, Any], slot: int = 0, signature: str = ""
@@ -134,46 +180,21 @@ class Store:
         config = self.configs.get(mint)
         if config is None:
             return None
-        pool = self.pools.get(mint, {})
         now = self.now()
-        curve = [(p["seconds_held"], p["tax_bps"]) for p in config["tax_curve"]]
 
         return {
             "mint": mint,
             "creator": config["creator"],
-            "launchTimestamp": config["launch_timestamp"],
-            "ageSeconds": now - config["launch_timestamp"],
-            "vestDurationSeconds": config["vest_duration_seconds"],
-            "decimals": config["decimals"],
-            "taxCurve": [
-                {"secondsHeld": secs, "taxBps": bps} for secs, bps in curve
-            ],
-            "currentOpeningTaxBps": tax_bps_for_age(curve, 0),
-            "curve": {
-                "virtualSolReserves": config["virtual_sol_reserves"],
-                "virtualTokenReserves": config["virtual_token_reserves"],
-                "realSolReserves": config["real_sol_reserves"],
-                "tokensSold": config["tokens_sold"],
-                "spotPriceLamports": spot_price_lamports(
-                    config["virtual_sol_reserves"],
-                    config["virtual_token_reserves"],
-                    config["decimals"],
-                ),
-                "marketCapLamports": spot_price_lamports(
-                    config["virtual_sol_reserves"],
-                    config["virtual_token_reserves"],
-                    config["decimals"],
-                )
-                * (config["tokens_sold"] // (10 ** config["decimals"]))
-                if config["decimals"] <= 18
-                else 0,
-            },
+            "registeredAt": config["registered_at"],
+            "ageSeconds": now - config["registered_at"],
+            "depositVault": config["deposit_vault"],
+            "vaultLamports": self.vault_lamports.get(mint, 0),
+            "registrationMarkerLamports": REGISTRATION_MARKER_LAMPORTS,
             "pool": self.pool_view(mint),
-            "holderCount": config["holder_count"],
-            "totalBuyVolumeTokens": config["total_buy_volume_tokens"],
-            "totalSellVolumeTokens": config["total_sell_volume_tokens"],
-            "poolAccount": config["pool_account"],
-            "curveVault": config["curve_vault"],
+            "registrationCount": sum(1 for (m, _o) in self.registrations if m == mint),
+            "pendingRegistrationCount": sum(
+                1 for (m, _o) in self.pending_registrations if m == mint
+            ),
         }
 
     def pool_view(self, mint: str) -> Dict[str, Any]:
@@ -198,8 +219,9 @@ class Store:
         }
 
     def _effective_acc(self, mint: str) -> int:
-        """Accumulator including any buffered tax that would flush on the next
-        touch - so the UI's projection matches what a claim would actually pay."""
+        """Accumulator including any buffered fee that would flush on the
+        next touch - so the UI's projection matches what a claim would
+        actually pay."""
         pool = self.pools.get(mint)
         if pool is None:
             return 0
@@ -208,49 +230,17 @@ class Store:
             acc, _ = distribute(acc, pool["total_weighted_shares"], pool["undistributed"])
         return acc
 
-    def position_view(self, mint: str, owner: str) -> Optional[Dict[str, Any]]:
-        position = self.positions.get((mint, owner))
-        if position is None:
+    def registration_view(self, mint: str, owner: str) -> Optional[Dict[str, Any]]:
+        r = self.registrations.get((mint, owner))
+        if r is None:
             return None
-        config = self.configs.get(mint)
-        vest = config["vest_duration_seconds"] if config else 0
-        curve = (
-            [(p["seconds_held"], p["tax_bps"]) for p in config["tax_curve"]] if config else []
-        )
         now = self.now()
+        age = now - r["registered_at"]
 
-        lots = []
-        total_remaining = 0
-        total_locked = 0
-        for lot in position["lots"]:
-            locked = max(lot["original"] - lot["cum_released"], 0)
-            remaining = locked + lot["released"]
-            age = now - lot["buy_timestamp"]
-            total_remaining += remaining
-            total_locked += locked
-            lots.append(
-                {
-                    "original": lot["original"],
-                    "remaining": remaining,
-                    "locked": locked,
-                    "released": lot["released"],
-                    "buyTimestamp": lot["buy_timestamp"],
-                    "ageSeconds": age,
-                    "vestedBps": vested_bps(lot["buy_timestamp"], now, vest),
-                    "claimableNow": max(
-                        vested_amount(lot["original"], lot["buy_timestamp"], now, vest)
-                        - lot["cum_released"],
-                        0,
-                    ),
-                    "currentTaxBps": tax_bps_for_age(curve, age),
-                    "tenureMultiplierBps": tenure_multiplier_bps(age),
-                }
-            )
-
-        claimable = position["pending_rewards"] + pending(
-            position["weighted_shares"], self._effective_acc(mint), position["reward_checkpoint"]
+        claimable = r["pending_rewards"] + pending(
+            r["weighted_shares"], self._effective_acc(mint), r["reward_checkpoint"]
         )
-        eligible_slot = position["last_increase_slot"] + MIN_CLAIM_DELAY_SLOTS
+        eligible_slot = r["last_sync_slot"] + MIN_CLAIM_DELAY_SLOTS
 
         pool = self.pools.get(mint, {})
         total_weight = pool.get("total_weighted_shares", 0)
@@ -258,82 +248,39 @@ class Store:
         return {
             "mint": mint,
             "owner": owner,
-            "lots": lots,
-            "totalRemaining": total_remaining,
-            "totalLocked": total_locked,
-            "spendable": position["spendable"],
-            "vestedClaimed": position["vested_claimed"],
-            "claimableVestedNow": sum(lot["claimableNow"] for lot in lots),
-            "unlockProgressBps": (
-                ((total_remaining - total_locked) * 10_000 // total_remaining)
-                if total_remaining
-                else 10_000
-            ),
-            "weightedShares": position["weighted_shares"],
+            "registeredAt": r["registered_at"],
+            "ageSeconds": age,
+            "tenureMultiplierBps": tenure_multiplier_bps(age),
+            "weightedShares": r["weighted_shares"],
             "poolSharePpm": (
-                position["weighted_shares"] * 1_000_000 // total_weight if total_weight else 0
+                r["weighted_shares"] * 1_000_000 // total_weight if total_weight else 0
             ),
             "projectedClaimable": claimable,
-            "lifetimeRewardsClaimed": position["lifetime_rewards_claimed"],
+            "lifetimeRewardsClaimed": r["lifetime_rewards_claimed"],
             "claimEligibleAtSlot": eligible_slot,
             "claimEligible": self.current_slot >= eligible_slot,
-            "costBasisLamports": position["cost_basis_lamports"],
-            "totalBought": position["total_bought"],
-            "totalSold": position["total_sold"],
-            "firstBuyTimestamp": position["first_buy_timestamp"],
-            "averageHoldSeconds": (
-                sum(lot["ageSeconds"] * lot["remaining"] for lot in lots) // total_remaining
-                if total_remaining
-                else 0
-            ),
         }
 
-    def positions_for_owner(self, owner: str) -> List[Dict[str, Any]]:
+    def registrations_for_owner(self, owner: str) -> List[Dict[str, Any]]:
         return [
             view
-            for (mint, holder) in list(self.positions)
-            if holder == owner
-            for view in [self.position_view(mint, owner)]
+            for (mint, o) in list(self.registrations)
+            if o == owner
+            for view in [self.registration_view(mint, owner)]
             if view is not None
         ]
 
-    def positions_for_mint(self, mint: str) -> List[Dict[str, Any]]:
+    def registrations_for_mint(self, mint: str) -> List[Dict[str, Any]]:
         return [
             view
-            for (m, owner) in list(self.positions)
+            for (m, owner) in list(self.registrations)
             if m == mint
-            for view in [self.position_view(mint, owner)]
+            for view in [self.registration_view(mint, owner)]
             if view is not None
         ]
 
-    def reputation_view(self, owner: str) -> Dict[str, Any]:
-        rep = self.reputations.get(owner)
-        positions = self.positions_for_owner(owner)
-
-        score = rep["score"] if rep else 0
-        tier = rep["tier"] if rep else tier_for_score(score)
-        held_positions = [p for p in positions if p["totalRemaining"] > 0]
-        weighted_age = sum(p["averageHoldSeconds"] * p["totalRemaining"] for p in held_positions)
-        weight_base = sum(p["totalRemaining"] for p in held_positions)
-
-        return {
-            "owner": owner,
-            "score": str(score),
-            "tier": tier,
-            "tierName": TIER_NAMES[min(tier, len(TIER_NAMES) - 1)],
-            "nextTierAt": _next_tier_threshold(score),
-            "tokensHeldToMaturity": rep["tokens_held_to_maturity"] if rep else 0,
-            "totalTenureWeightedVolume": str(
-                rep["total_tenure_weighted_volume"] if rep else 0
-            ),
-            "firstSeenTimestamp": rep["first_seen_timestamp"] if rep else 0,
-            "lastUpdateTimestamp": rep["last_update_timestamp"] if rep else 0,
-            "activePositions": len(held_positions),
-            "averageHoldSeconds": weighted_age // weight_base if weight_base else 0,
-            "capitalAtRiskLamports": sum(p["costBasisLamports"] for p in positions),
-            "perks": tier_perks(tier),
-            "positions": positions,
-        }
+    def pending_registrations_for_mint(self, mint: str) -> List[Dict[str, Any]]:
+        return [p.as_dict() for (m, _o), p in self.pending_registrations.items() if m == mint]
 
     def feed_view(
         self,
@@ -349,12 +296,7 @@ class Store:
                 continue
             if mint and event.data.get("mint") != mint:
                 continue
-            if owner and owner not in (
-                event.data.get("owner"),
-                event.data.get("buyer"),
-                event.data.get("payer"),
-                event.data.get("destination"),
-            ):
+            if owner and owner != event.data.get("owner"):
                 continue
             out.append(event.as_dict())
             if len(out) >= limit:
@@ -364,32 +306,10 @@ class Store:
     def stats(self) -> Dict[str, Any]:
         return {
             "tokens": len(self.configs),
-            "positions": len(self.positions),
-            "reputations": len(self.reputations),
+            "registrations": len(self.registrations),
+            "pendingRegistrations": len(self.pending_registrations),
             "events": len(self.feed),
             "currentSlot": self.current_slot,
             "subscribers": len(self.subscribers),
-            "totalTaxCollected": sum(p["total_collected"] for p in self.pools.values()),
+            "totalFeesCollected": sum(p["total_collected"] for p in self.pools.values()),
         }
-
-
-def _next_tier_threshold(score: int) -> Optional[str]:
-    from stackapp_sim.constants import REPUTATION_TIER_THRESHOLDS
-
-    for threshold in REPUTATION_TIER_THRESHOLDS:
-        if score < threshold:
-            return str(threshold)
-    return None
-
-
-def tier_perks(tier: int) -> List[str]:
-    """What a tier unlocks. Prototype copy - none of this is enforced on chain
-    beyond the tier number itself, which is the point of showing it plainly."""
-    ladder = [
-        ["Read-only access to the public feed"],
-        ["Launch fee rebate", "Feed badge"],
-        ["Early access to new launches (1h)", "Reduced launch fee"],
-        ["Early access to new launches (6h)", "Creator allowlist eligibility"],
-        ["Early access to new launches (24h)", "Governance weight on curve presets"],
-    ]
-    return ladder[min(tier, len(ladder) - 1)]

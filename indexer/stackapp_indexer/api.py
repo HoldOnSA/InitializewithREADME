@@ -3,16 +3,16 @@
     GET  /api/health
     GET  /api/tokens
     GET  /api/tokens/{mint}
-    GET  /api/tokens/{mint}/holders
-    GET  /api/positions/{owner}
-    GET  /api/positions/{mint}/{owner}
-    GET  /api/passport/{wallet}
+    GET  /api/tokens/{mint}/registrations
+    GET  /api/tokens/{mint}/pending           - marker candidates awaiting write_registration
+    GET  /api/registrations/{owner}
+    GET  /api/registrations/{mint}/{owner}
     GET  /api/feed?limit=&mint=&kind=&owner=
     GET  /api/pdas/{mint}?owner=
-    WS   /ws                 - live event feed, newest first
+    WS   /ws                                  - live event feed, newest first
 
-The JSON API lives under /api because the bare paths (/feed, /passport/{wallet},
-/token/{mint}) are the Python-served HTML pages - see web/routes.py.
+The JSON API lives under /api because the bare paths (/feed, /token/{mint})
+are the Python-served HTML pages - see web/routes.py.
 """
 
 from __future__ import annotations
@@ -32,10 +32,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import Settings
 from .layouts import EVENT_LAYOUTS, load_idl_overrides
 from .pda import (
-    curve_vault_pda,
+    deposit_vault_pda,
+    global_config_pda,
     loyalty_pool_pda,
-    position_pda,
-    reputation_pda,
+    registration_pda,
     token_config_pda,
 )
 from .store import Store
@@ -66,9 +66,9 @@ def create_app(
 
     app = FastAPI(
         title="StackApp indexer",
-        version="0.1.0",
+        version="0.2.0",
         description=(
-            "Devnet prototype indexer for the StackApp launchpad. "
+            "Devnet prototype indexer for StackApp's pump.fun loyalty layer. "
             "Unaudited; no mainnet path."
         ),
         lifespan=lifespan,
@@ -105,9 +105,7 @@ def create_app(
 
     @app.get("/api/tokens")
     async def tokens() -> List[Dict[str, Any]]:
-        return sorted(
-            store.list_tokens(), key=lambda t: t["launchTimestamp"], reverse=True
-        )
+        return sorted(store.list_tokens(), key=lambda t: t["registeredAt"], reverse=True)
 
     @app.get("/api/tokens/{mint}")
     async def token(mint: str) -> Dict[str, Any]:
@@ -116,26 +114,28 @@ def create_app(
             raise HTTPException(status_code=404, detail="unknown mint")
         return view
 
-    @app.get("/api/tokens/{mint}/holders")
-    async def holders(mint: str, limit: int = Query(100, ge=1, le=1000)) -> List[Dict[str, Any]]:
-        rows = store.positions_for_mint(mint)
-        rows.sort(key=lambda p: p["weightedShares"], reverse=True)
+    @app.get("/api/tokens/{mint}/registrations")
+    async def registrations_for_mint(
+        mint: str, limit: int = Query(100, ge=1, le=1000)
+    ) -> List[Dict[str, Any]]:
+        rows = store.registrations_for_mint(mint)
+        rows.sort(key=lambda r: r["weightedShares"], reverse=True)
         return rows[:limit]
 
-    @app.get("/api/positions/{owner}")
-    async def positions(owner: str) -> List[Dict[str, Any]]:
-        return store.positions_for_owner(owner)
+    @app.get("/api/tokens/{mint}/pending")
+    async def pending_for_mint(mint: str) -> List[Dict[str, Any]]:
+        return store.pending_registrations_for_mint(mint)
 
-    @app.get("/api/positions/{mint}/{owner}")
-    async def position(mint: str, owner: str) -> Dict[str, Any]:
-        view = store.position_view(mint, owner)
+    @app.get("/api/registrations/{owner}")
+    async def registrations_for_owner(owner: str) -> List[Dict[str, Any]]:
+        return store.registrations_for_owner(owner)
+
+    @app.get("/api/registrations/{mint}/{owner}")
+    async def registration(mint: str, owner: str) -> Dict[str, Any]:
+        view = store.registration_view(mint, owner)
         if view is None:
-            raise HTTPException(status_code=404, detail="no position")
+            raise HTTPException(status_code=404, detail="no registration")
         return view
-
-    @app.get("/api/passport/{wallet}")
-    async def passport(wallet: str) -> Dict[str, Any]:
-        return store.reputation_view(wallet)
 
     @app.get("/api/feed")
     async def feed(
@@ -151,26 +151,26 @@ def create_app(
         """Addresses the frontend needs to build instructions client-side."""
         program_id = settings.program_id
         try:
+            gconfig, gconfig_bump = global_config_pda(program_id)
             config, config_bump = token_config_pda(mint, program_id)
             pool, pool_bump = loyalty_pool_pda(mint, program_id)
-            vault, vault_bump = curve_vault_pda(mint, program_id)
+            vault, vault_bump = deposit_vault_pda(mint, program_id)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=400, detail=f"bad mint: {exc}") from exc
 
         out: Dict[str, Any] = {
             "programId": program_id,
+            "globalConfig": {"address": gconfig, "bump": gconfig_bump},
             "tokenConfig": {"address": config, "bump": config_bump},
             "loyaltyPool": {"address": pool, "bump": pool_bump},
-            "curveVault": {"address": vault, "bump": vault_bump},
+            "depositVault": {"address": vault, "bump": vault_bump},
         }
         if owner:
             try:
-                pos, pos_bump = position_pda(mint, owner, program_id)
-                rep, rep_bump = reputation_pda(owner, program_id)
+                reg, reg_bump = registration_pda(mint, owner, program_id)
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(status_code=400, detail=f"bad owner: {exc}") from exc
-            out["position"] = {"address": pos, "bump": pos_bump}
-            out["reputation"] = {"address": rep, "bump": rep_bump}
+            out["registration"] = {"address": reg, "bump": reg_bump}
         return out
 
     @app.websocket("/ws")

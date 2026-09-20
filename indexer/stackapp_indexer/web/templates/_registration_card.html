@@ -1,0 +1,15 @@
+{% import "_macros.html" as m %}
+
+<div class="grid cols-4">
+  {{ m.stat('Registered', r.ageSeconds | duration ~ ' ago') }}
+  {{ m.stat('Tenure ×', '%.2f' % (r.tenureMultiplierBps / 10000) ~ '×',
+            'weight ' ~ '{:,}'.format(r.weightedShares), 'stack') }}
+  {{ m.stat('Pool share', '%.4f' % (r.poolSharePpm / 10000) ~ '%', tone='pool') }}
+  {{ m.stat('Claimable', r.projectedClaimable | sol,
+            'eligible now' if r.claimEligible else 'waiting out the claim delay', 'pool') }}
+</div>
+<p class="hint" style="margin-top:12px">
+  Weight is recomputed from your <em>live</em> pump.fun balance every time you sync or claim -
+  never a cached number. Syncing or claiming again after your balance changes is what keeps
+  this accurate.
+</p>

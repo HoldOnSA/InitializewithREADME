@@ -12,7 +12,11 @@ extension signs and submits it:
 
 **No private key ever reaches this process.** The server builds an unsigned
 message and never sees a signature; signing and submission happen entirely in
-the user's wallet.
+the user's wallet - including for `register_mint`/`write_registration`, which
+are authority-gated on chain but signed the same way as everything else here:
+whichever wallet the operator connects. If it isn't the real
+`GlobalConfig.authority`, the transaction simply fails on chain, the same as
+any other constraint violation this module doesn't pre-check.
 
 Message layout (legacy):
 
@@ -33,13 +37,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Sequence
 
+from .ata import derive_ata
 from .borsh import Writer, b58decode, b58encode
 from .layouts import discriminator
 from .pda import (
-    curve_vault_pda,
+    deposit_vault_pda,
+    global_config_pda,
     loyalty_pool_pda,
-    position_pda,
-    reputation_pda,
+    registration_pda,
     token_config_pda,
 )
 
@@ -183,208 +188,137 @@ def _ix(program_id: str, accounts: List[AccountMeta], name: str, data: bytes = b
     return Instruction(program_id, accounts, discriminator("global", name) + data)
 
 
-def initialize_launch(
-    program_id: str,
-    creator: str,
-    mint: str,
-    tax_curve: Sequence[tuple],
-    vest_duration_seconds: int,
-    virtual_sol_reserves: int = 0,
-    virtual_token_reserves: int = 0,
-    decimals: int = 6,
-) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    vault, _ = curve_vault_pda(mint, program_id)
-
-    writer = Writer()
-    writer.write(("vec", ("struct", [("seconds_held", "i64"), ("tax_bps", "u16")])),
-                 [{"seconds_held": int(s), "tax_bps": int(b)} for s, b in tax_curve])
-    writer.write("i64", int(vest_duration_seconds))
-    writer.write("u64", int(virtual_sol_reserves))
-    writer.write("u64", int(virtual_token_reserves))
-    writer.write("u8", int(decimals))
-
+def initialize_config(program_id: str, payer: str, authority: str) -> Instruction:
+    global_config, _ = global_config_pda(program_id)
+    data = Writer().write("pubkey", authority).bytes()
     return _ix(
         program_id,
-        [signer(creator), ro(mint), rw(config), rw(pool), rw(vault), ro(SYSTEM_PROGRAM_ID)],
-        "initialize_launch",
-        writer.bytes(),
+        [signer(payer), rw(global_config), ro(SYSTEM_PROGRAM_ID)],
+        "initialize_config",
+        data,
     )
 
 
-def buy(
-    program_id: str, buyer: str, mint: str, amount: int, max_cost_lamports: int = 0
-) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, buyer, program_id)
-    vault, _ = curve_vault_pda(mint, program_id)
+def update_authority(program_id: str, authority: str, new_authority: str) -> Instruction:
+    global_config, _ = global_config_pda(program_id)
+    data = Writer().write("pubkey", new_authority).bytes()
+    return _ix(
+        program_id,
+        [signer(authority, False), rw(global_config)],
+        "update_authority",
+        data,
+    )
 
-    data = Writer().write("u64", int(amount)).write("u64", int(max_cost_lamports)).bytes()
+
+def register_mint(program_id: str, authority: str, mint: str, creator: str) -> Instruction:
+    global_config, _ = global_config_pda(program_id)
+    token_config, _ = token_config_pda(mint, program_id)
+    pool, _ = loyalty_pool_pda(mint, program_id)
+    vault, _ = deposit_vault_pda(mint, program_id)
+
+    data = Writer().write("pubkey", creator).bytes()
     return _ix(
         program_id,
         [
-            signer(buyer),
+            signer(authority),
+            ro(global_config),
             ro(mint),
-            rw(config),
+            rw(token_config),
             rw(pool),
-            rw(position),
             rw(vault),
             ro(SYSTEM_PROGRAM_ID),
         ],
-        "buy",
+        "register_mint",
         data,
     )
 
 
-def claim_vested(program_id: str, owner: str, mint: str) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, owner, program_id)
-    return _ix(
-        program_id,
-        [signer(owner, False), ro(mint), ro(config), rw(pool), rw(position)],
-        "claim_vested",
-    )
+def write_registration(program_id: str, authority: str, owner: str, mint: str) -> Instruction:
+    global_config, _ = global_config_pda(program_id)
+    token_config, _ = token_config_pda(mint, program_id)
+    vault, _ = deposit_vault_pda(mint, program_id)
+    registration, _ = registration_pda(mint, owner, program_id)
 
-
-def sell(
-    program_id: str, seller: str, mint: str, amount: int, min_proceeds_lamports: int = 0
-) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, seller, program_id)
-    vault, _ = curve_vault_pda(mint, program_id)
-
-    data = Writer().write("u64", int(amount)).write("u64", int(min_proceeds_lamports)).bytes()
     return _ix(
         program_id,
         [
-            signer(seller),
+            signer(authority, False),
+            ro(global_config),
+            ro(owner),
             ro(mint),
-            rw(config),
-            rw(pool),
-            rw(position),
+            ro(token_config),
             rw(vault),
+            rw(registration),
             ro(SYSTEM_PROGRAM_ID),
         ],
-        "sell",
-        data,
+        "write_registration",
     )
 
 
-def transfer_position(
-    program_id: str, sender: str, recipient: str, mint: str, amount: int
-) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
+def sync(program_id: str, cranker: str, owner: str, mint: str, token_program: str) -> Instruction:
+    token_config, _ = token_config_pda(mint, program_id)
     pool, _ = loyalty_pool_pda(mint, program_id)
-    from_position, _ = position_pda(mint, sender, program_id)
-    to_position, _ = position_pda(mint, recipient, program_id)
+    registration, _ = registration_pda(mint, owner, program_id)
+    holder_token_account = derive_ata(owner, mint, token_program)
 
-    data = Writer().write("u64", int(amount)).bytes()
-    return _ix(
-        program_id,
-        [
-            signer(sender),
-            ro(mint),
-            ro(recipient),
-            rw(config),
-            rw(pool),
-            rw(from_position),
-            rw(to_position),
-            ro(SYSTEM_PROGRAM_ID),
-        ],
-        "transfer_position",
-        data,
-    )
-
-
-def donate_to_pool(program_id: str, owner: str, mint: str, amount: int) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, owner, program_id)
-
-    data = Writer().write("u64", int(amount)).bytes()
-    return _ix(
-        program_id,
-        [signer(owner, False), ro(mint), rw(config), rw(pool), rw(position)],
-        "donate_to_pool",
-        data,
-    )
-
-
-def claim_pool_share(program_id: str, owner: str, mint: str) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, owner, program_id)
-    return _ix(
-        program_id,
-        [signer(owner, False), ro(mint), ro(config), rw(pool), rw(position)],
-        "claim_pool_share",
-    )
-
-
-def update_reputation(program_id: str, owner: str, mint: str) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, owner, program_id)
-    reputation, _ = reputation_pda(owner, program_id)
-    return _ix(
-        program_id,
-        [
-            signer(owner),
-            ro(mint),
-            ro(config),
-            rw(pool),
-            rw(position),
-            rw(reputation),
-            ro(SYSTEM_PROGRAM_ID),
-        ],
-        "update_reputation",
-    )
-
-
-def sync_weight(program_id: str, cranker: str, owner: str, mint: str) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
-    pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, owner, program_id)
     return _ix(
         program_id,
         [
             signer(cranker, False),
             ro(mint),
             ro(owner),
-            ro(config),
+            ro(token_config),
             rw(pool),
-            rw(position),
+            rw(registration),
+            ro(holder_token_account),
         ],
-        "sync_weight",
+        "sync",
     )
 
 
-def compact_lots(program_id: str, owner: str, mint: str) -> Instruction:
-    config, _ = token_config_pda(mint, program_id)
+def claim(program_id: str, owner: str, mint: str, token_program: str) -> Instruction:
+    token_config, _ = token_config_pda(mint, program_id)
     pool, _ = loyalty_pool_pda(mint, program_id)
-    position, _ = position_pda(mint, owner, program_id)
+    registration, _ = registration_pda(mint, owner, program_id)
+    vault, _ = deposit_vault_pda(mint, program_id)
+    holder_token_account = derive_ata(owner, mint, token_program)
+
     return _ix(
         program_id,
-        [signer(owner, False), ro(mint), ro(config), rw(pool), rw(position)],
-        "compact_lots",
+        [
+            signer(owner),
+            ro(mint),
+            ro(token_config),
+            rw(pool),
+            rw(registration),
+            rw(vault),
+            ro(holder_token_account),
+        ],
+        "claim",
+    )
+
+
+def donate(program_id: str, donor: str, mint: str, amount: int) -> Instruction:
+    pool, _ = loyalty_pool_pda(mint, program_id)
+    vault, _ = deposit_vault_pda(mint, program_id)
+
+    data = Writer().write("u64", int(amount)).bytes()
+    return _ix(
+        program_id,
+        [signer(donor), ro(mint), rw(pool), rw(vault), ro(SYSTEM_PROGRAM_ID)],
+        "donate",
+        data,
     )
 
 
 BUILDERS = {
-    "initialize_launch": initialize_launch,
-    "buy": buy,
-    "claim_vested": claim_vested,
-    "sell": sell,
-    "transfer_position": transfer_position,
-    "donate_to_pool": donate_to_pool,
-    "claim_pool_share": claim_pool_share,
-    "update_reputation": update_reputation,
-    "sync_weight": sync_weight,
-    "compact_lots": compact_lots,
+    "initialize_config": initialize_config,
+    "update_authority": update_authority,
+    "register_mint": register_mint,
+    "write_registration": write_registration,
+    "sync": sync,
+    "claim": claim,
+    "donate": donate,
 }
 
 
@@ -405,3 +339,35 @@ async def latest_blockhash(rpc_http: str) -> str:
     if "error" in body:
         raise TxBuildError(f"getLatestBlockhash failed: {body['error']}")
     return body["result"]["value"]["blockhash"]
+
+
+async def mint_token_program(rpc_http: str, mint: str) -> str:
+    """Which token program owns `mint` - Legacy Token or Token-2022.
+
+    Real pump.fun mints split roughly 14:1 Token-2022 vs legacy, so this is
+    never assumed; `sync`/`claim` derive the caller's ATA under whichever one
+    actually owns the mint.
+    """
+    import httpx
+
+    from .ata import SUPPORTED_TOKEN_PROGRAMS
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getAccountInfo",
+        "params": [mint, {"encoding": "base64"}],
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.post(rpc_http, json=payload)
+        response.raise_for_status()
+        body = response.json()
+    if "error" in body:
+        raise TxBuildError(f"getAccountInfo failed: {body['error']}")
+    value = (body.get("result") or {}).get("value")
+    if value is None:
+        raise TxBuildError(f"mint {mint} does not exist on chain")
+    owner = value["owner"]
+    if owner not in SUPPORTED_TOKEN_PROGRAMS:
+        raise TxBuildError(f"mint {mint} is owned by an unsupported token program {owner}")
+    return owner

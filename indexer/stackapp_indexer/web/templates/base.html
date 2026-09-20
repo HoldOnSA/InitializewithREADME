@@ -16,8 +16,7 @@
 <nav class="top">
   <a class="brand" href="/"><span class="mark">S</span> StackApp</a>
   <span class="links">
-    <a href="/" class="{{ 'active' if page == 'home' }}">Launches</a>
-    <a href="/launch" class="{{ 'active' if page == 'launch' }}">Launch</a>
+    <a href="/" class="{{ 'active' if page == 'home' }}">Tokens</a>
     <a href="/feed" class="{{ 'active' if page == 'feed' }}">Feed</a>
     {% if mode == 'mock' %}<a href="/docs">API</a>{% endif %}
   </span>
@@ -39,12 +38,16 @@
 
 <footer>
   <p>
-    StackApp is a devnet prototype of a tenure-weighted launchpad. Going to mainnet would
-    require a full security audit and separate legal review before handling any real user funds.
+    StackApp is a devnet prototype of a loyalty layer on real pump.fun tokens. Going to mainnet
+    would require a full security audit and separate legal review before handling any real user
+    funds. See <code>SECURITY_NOTES.md</code> in the repo for what is and isn't trust-minimized
+    today.
   </p>
   <p>
     Transactions are assembled on the server as <em>unsigned</em> messages and signed in your
-    wallet. No private key is ever sent anywhere.
+    wallet. No private key is ever sent anywhere - including for the authority-gated actions
+    (register a token, write a registration), which are just signed by whichever wallet you
+    connect.
   </p>
 </footer>
 

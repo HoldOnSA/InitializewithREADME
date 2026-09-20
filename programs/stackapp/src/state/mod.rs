@@ -1,11 +1,11 @@
-pub mod curve_vault;
+pub mod deposit_vault;
+pub mod global_config;
 pub mod loyalty_pool;
-pub mod position;
-pub mod reputation;
+pub mod registration;
 pub mod token_config;
 
-pub use curve_vault::*;
+pub use deposit_vault::*;
+pub use global_config::*;
 pub use loyalty_pool::*;
-pub use position::*;
-pub use reputation::*;
+pub use registration::*;
 pub use token_config::*;

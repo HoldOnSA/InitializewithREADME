@@ -10,4 +10,10 @@ pub enum StackError {
     NothingToClaim,
     #[msg("Token account is not the owner's canonical associated token account for this mint")]
     NotHoldersAta,
+    #[msg("Mint is not owned by a supported token program")]
+    UnsupportedTokenProgram,
+    #[msg("Token account data is missing or uninitialized")]
+    InvalidTokenAccount,
+    #[msg("Donation amount must be greater than zero")]
+    ZeroDonation,
 }

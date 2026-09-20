@@ -33,8 +33,8 @@ pub struct WeightSynced {
     pub timestamp: i64,
 }
 
-/// Emitted whenever `claim` pulls newly available lamports into the
-/// accumulator, whichever wallet's claim triggered it.
+/// Emitted whenever `donate` routes newly available lamports into the
+/// accumulator - the only source of real fee revenue.
 #[event]
 pub struct FeeCollected {
     pub mint: Pubkey,

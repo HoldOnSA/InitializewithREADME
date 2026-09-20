@@ -40,55 +40,64 @@ mainnet, that key needs to live behind whatever the team's actual key
 management is (HSM / multisig-gated hot key rotation), not a single hot
 wallet with no recourse if it leaks.
 
-## 2. `pull_pump_fee` is not wired to a real CPI yet
+## 2. There is no automatic pull from pump.fun - by design, after verifying the alternative doesn't work
 
-`pumpfun.rs::pull_pump_fee` is a stub that always returns `0`. I researched
-the real pump.fun IDL
-([`pump-fun/pump-public-docs`](https://github.com/pump-fun/pump-public-docs),
-`idl/pump.json` + `idl/pump_fees.json`) and confirmed:
+The original plan was: get `DepositVault` listed as one of a token's up to
+10 pump.fun "Creator Fee Sharing" wallets, then permissionlessly CPI into
+`collect_creator_fee` with `creator = DepositVault` to pull our cut. Before
+wiring that, I verified the actual account layout against several real,
+live mainnet pump.fun tokens (read-only RPC queries, no wallet or
+transactions involved) instead of trusting the IDL's shape alone, and found
+it doesn't work the way that plan assumed:
 
-- Program ID `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`.
-- `collect_creator_fee`'s `creator` account is **not a signer** - genuinely
-  permissionless, which is exactly the property `claim` needs to pull fees
-  in without anyone's separate signature.
-- The Jan 2026 "up to 10 wallets" fee-sharing feature is configured entirely
-  through pump.fun's own UI, via `pump_fees` program instructions
-  (`create_fee_sharing_config`, `update_fee_shares`/`_v2`) that the token's
-  *creator* calls - StackApp is never a party to that call. It only needs
-  `DepositVault`'s address to already be one of the up to 10 configured
-  `Shareholder` entries by the time `register_mint` is called.
+- `collect_creator_fee`'s `creator_vault` is a plain PDA seeded
+  `["creator-vault", creator]`. Confirmed live: it's a 0-byte,
+  System-Program-owned lamport account, exactly as expected.
+- But for a token with fee-sharing configured, pump.fun rewrites the
+  bonding curve's `creator` field to point at the `SharingConfig` PDA
+  itself, not at any shareholder's wallet. That means **all fees for a
+  shared token accumulate in one vault keyed to the `SharingConfig`
+  address** - there is no per-shareholder vault to individually pull from.
+  I confirmed this empirically: deriving `creator_vault` from two real
+  configured shareholders' own wallet addresses found one nonexistent
+  account and one holding only rent-exempt dust, while the vault derived
+  from the `SharingConfig` PDA's own address held a real, non-round
+  accumulated balance on both sampled tokens.
+- The only instruction in the public `pump_fees` IDL that touches that
+  shared vault afterward is `update_fee_shares`/`_v2`, gated to the
+  config's `authority` signer - not something an arbitrary shareholder can
+  call permissionlessly.
 
-What I could **not** confirm closely enough to trust blind: whether a
-configured shareholder's cut is pre-split into its own claimable vault (so
-`collect_creator_fee` with `creator = DepositVault` just works unmodified),
-or whether an additional distribution step has to run first. Wiring the CPI
-on an unverified guess here is worse than leaving it stubbed - a wrong
-account in a real CPI can fail loudly (fine) or silently move funds
-somewhere unintended (not fine).
+So simply being *listed* as a shareholder doesn't give StackApp a
+permissionless way to claim its cut. The alternative - having StackApp's
+program itself hold the `SharingConfig` authority for a token - was
+considered and explicitly rejected: it would require every participating
+creator to hand StackApp control over their own pump.fun fee-sharing
+config, a much bigger trust ask than anything else in this design, for a
+feature (automatic pulls) that isn't required for the accumulator to work.
 
-**Before this is turned on**: register a real (probably devnet) pump.fun
-token, actually configure `DepositVault` as one of its fee-sharing wallets
-through pump.fun's own UI, and confirm `collect_creator_fee` behaves exactly
-as documented before flipping `pull_pump_fee` from a stub to a real
-`invoke_signed` CPI.
+**What replaces it**: `donate` (`instructions/donate.rs`), a fully
+permissionless instruction anyone can call to voluntarily route lamports
+into a token's `LoyaltyPool`. In practice this is meant to be the creator,
+manually claiming their own pump.fun fee the normal way and then calling
+`donate` with some or all of it - but the instruction itself has no idea
+who's calling it or where the lamports came from, and doesn't need to.
+This sidesteps the fee-sharing mechanics entirely and doesn't depend on any
+undocumented pump.fun internals.
 
-**Current practical effect**: `DepositVault`'s balance only grows from
-registration markers and manual/test deposits, never from real pump.fun
-trading fees, until this is wired. Everything downstream - the accumulator,
-`sync`, `claim`'s payout math - is fully real and tested regardless; only
-the pull-in step is inert.
+**Practical effect**: `DepositVault`'s balance, and therefore the pool,
+only ever grows from registration markers and `donate` calls - never
+automatically from pump.fun trading fees. The accumulator, `sync`, and
+`claim`'s payout math are unaffected by this and are fully real regardless
+of where a given lamport came from.
 
-## 3. `register_mint`'s off-chain trust step
+## 3. `register_mint` has no off-chain trust step to worry about
 
-The backend is trusted to have actually verified, through pump.fun's own
-UI/API, that a token's creator configured `DepositVault`'s address as a real
-fee-sharing recipient before calling `register_mint`. The program has no way
-to check this itself - there's no on-chain link between a pump.fun mint and
-its `sharing_config` that this program reads or validates. If the backend
-registers a mint that was never actually configured this way, `claim` will
-just always find zero available fee for it (once #2 is wired) - a silent
-no-op, not a fund-safety issue, but worth knowing before treating "this mint
-shows up in StackApp" as proof it's actually earning anything.
+Earlier this required the backend to verify, off chain, that a creator had
+configured `DepositVault` as a real fee-sharing recipient before calling
+`register_mint`. That's gone along with the fee-sharing plan (#2) -
+`register_mint` just starts tracking a mint; nothing about it is contingent
+on any pump.fun-side configuration existing.
 
 ## 4. Arithmetic
 
@@ -111,6 +120,7 @@ same pattern the original design used throughout.
 | `write_registration` | `GlobalConfig.authority` | `has_one = authority` |
 | `sync` | nobody in particular - fully permissionless | none; `cranker` is an unchecked signer, present only to pay the transaction fee |
 | `claim` | the registration's own `owner` | `has_one = owner` on `Registration`, plus the payout lands in `owner`'s own account, which the caller supplies but cannot redirect - it's read from `Registration.owner`, not from an arbitrary account the caller names |
+| `donate` | nobody in particular - fully permissionless | none; `donor` only needs to be able to pay the lamports it's donating, and can never be identified or refunded afterward |
 
 `sync`'s complete permissionlessness is deliberate, not an oversight - see
 its doc comment. It can only ever move a registration's *own* weight closer
@@ -121,11 +131,34 @@ the crank ran.
 
 ## 6. CPI / reentrancy
 
-Once #2 is wired, the only CPI in the whole program will be
-`collect_creator_fee` (pump.fun) plus the `system_program::create_account`
-CPI `write_registration` already uses today. Neither hands control to
-arbitrary caller-supplied code - both target fixed, well-known program IDs.
-Payouts (`claim`'s reward transfer, and eventually `pull_pump_fee`'s pull)
-go through direct `try_borrow_mut_lamports` balance mutation rather than a
-CPI wherever possible (matching the original design's `sell.rs` pattern),
-which is the narrower, no-external-code-runs option when it's available.
+The only CPIs in the whole program are `system_program::create_account`
+(`write_registration`, funding the new `Registration` PDA from
+`DepositVault`) and `system_program::transfer` (`donate`, moving the
+donor's own lamports in). Neither hands control to arbitrary
+caller-supplied code - both target the fixed System Program. Payouts
+(`claim`'s reward transfer) go through direct `try_borrow_mut_lamports`
+balance mutation rather than a CPI, which is the narrower,
+no-external-code-runs option, matching the original design's `sell.rs`
+pattern.
+
+## 7. Reading token accounts manually, across two token programs
+
+`sync` and `claim` don't deserialize a holder's token account via
+`anchor_spl::token::TokenAccount` - that type requires an exact 165-byte
+match (`Pack::unpack`'s contract), which fails on any real Token-2022
+account carrying extension data, including every ATA the current
+Associated Token Account program creates (it always adds
+`ImmutableOwner`). Verified against real, live mainnet pump.fun tokens: 14
+of 15 sampled use Token-2022, not legacy SPL Token, so this isn't an edge
+case - it's the common case.
+
+Instead, `ata::read_token_amount` reads the `amount` field directly out of
+raw account bytes at its fixed offset (64..72), which both token programs'
+base account layout share byte-for-byte regardless of what extension data
+Token-2022 appends afterward. `ata::derive_ata` is parameterized on
+whichever token program actually owns the mint (read directly off the
+mint account, not assumed), so the ATA address checked against
+`holder_token_account` is always derived under the right program. The
+risk this design accepts: if a *third* token program ever became common
+on pump.fun, it would be silently rejected by `is_supported_token_program`
+rather than silently mis-read - a hard error, not a wrong balance.

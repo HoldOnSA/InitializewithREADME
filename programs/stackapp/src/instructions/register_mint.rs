@@ -55,11 +55,13 @@ pub struct RegisterMint<'info> {
 
 /// Start tracking a pump.fun mint.
 ///
-/// Authority-gated: the backend calls this once it has verified, off chain
-/// (via pump.fun's own UI/API), that the token's creator actually configured
-/// `deposit_vault`'s address as one of their up-to-10 fee-sharing
-/// recipients. The program has no way to check that itself - see
-/// `SECURITY_NOTES.md`.
+/// Authority-gated: the backend calls this once it has decided to track a
+/// token. `creator` is purely informational (whose token this is, for UI
+/// display) - nothing here is gated on it, and unlike an earlier design,
+/// there's no off-chain fee-sharing configuration to verify first. Funding
+/// this token's pool is entirely via the permissionless `donate`
+/// instruction; `register_mint` itself doesn't assume anyone will ever call
+/// it.
 pub fn handler(ctx: Context<RegisterMint>, creator: Pubkey) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let mint_key = ctx.accounts.mint.key();

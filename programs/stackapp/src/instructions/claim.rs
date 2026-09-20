@@ -1,12 +1,10 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::TokenAccount;
 
-use crate::ata::derive_ata;
+use crate::ata::{derive_ata, is_supported_token_program, read_token_amount};
 use crate::constants::*;
 use crate::errors::StackError;
-use crate::events::{FeeCollected, RewardClaimed};
+use crate::events::RewardClaimed;
 use crate::logic::*;
-use crate::pumpfun::pull_pump_fee;
 use crate::state::*;
 
 #[derive(Accounts)]
@@ -14,7 +12,9 @@ pub struct Claim<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
-    /// CHECK: identity/seed for this token only.
+    /// CHECK: identity/seed for this token only; also read directly for its
+    /// owning program, to pick the right token program (legacy vs
+    /// Token-2022) - never deserialized as mint data.
     pub mint: UncheckedAccount<'info>,
 
     #[account(
@@ -49,25 +49,34 @@ pub struct Claim<'info> {
     )]
     pub deposit_vault: Account<'info, DepositVault>,
 
-    /// The caller's real SPL balance for this mint - verified in the handler
-    /// (see `ata::derive_ata`) to be their own canonical ATA. See `sync`'s
-    /// docs on why this, not any cached number, is what determines weight.
-    pub holder_token_account: Account<'info, TokenAccount>,
+    /// CHECK: the caller's real token account for this mint - verified in
+    /// the handler (see `ata::derive_ata`) to be their own canonical ATA
+    /// under whichever token program actually owns `mint`. See `sync`'s docs
+    /// on why this, not any cached number, is what determines weight, and
+    /// on why this isn't typed as `Account<TokenAccount>`.
+    pub holder_token_account: UncheckedAccount<'info>,
 }
 
-/// Pull in whatever pump.fun has made newly available, then pay the caller
+/// Sync the caller's own weight against their live balance, then pay out
 /// their accumulator share - the "no bot needed" design: calling this to
 /// collect your own share is what also settles everyone else's.
 ///
-/// 1. **Pull.** `pull_pump_fee` is currently a stub (see `pumpfun.rs` and
-///    `SECURITY_NOTES.md`) - real integration is a fast-follow once verified
-///    against a live registered token. Whatever it returns, real or zero,
-///    folds into the accumulator the same way.
-/// 2. **Sync.** Settle at the OLD weight, then re-price from the caller's
+/// `LoyaltyPool` is only ever fed by the permissionless `donate` instruction
+/// (see `instructions/donate.rs`) - there is no automatic pull from
+/// pump.fun here. See `SECURITY_NOTES.md` for why: pump.fun's own
+/// multi-wallet fee-sharing routes all fees into a single vault keyed to the
+/// `SharingConfig` PDA, not to individual shareholder wallets, and pulling a
+/// shareholder's own cut back out requires the config's `authority` to sign
+/// - not something StackApp can do permissionlessly for a token it doesn't
+/// control. `donate` sidesteps that entirely: anyone, especially the
+/// creator after claiming their own pump.fun fee normally, can voluntarily
+/// route SOL into this pool with no special authority needed.
+///
+/// 1. **Sync.** Settle at the OLD weight, then re-price from the caller's
 ///    *live* token balance - identical to what the permissionless `sync`
 ///    instruction does, inlined here so a claim never pays out against a
 ///    stale weight.
-/// 3. **Pay.** Real lamports, straight out of `deposit_vault`'s own balance,
+/// 2. **Pay.** Real lamports, straight out of `deposit_vault`'s own balance,
 ///    gated by `MIN_CLAIM_DELAY_SLOTS` since this registration's weight last
 ///    increased - the flash-loan guard: buy in, watch a fee land, and claim
 ///    in the same block does not work.
@@ -78,9 +87,14 @@ pub fn handler(ctx: Context<Claim>) -> Result<()> {
     let mint_key = ctx.accounts.token_config.mint;
     let owner_key = ctx.accounts.owner.key();
 
+    let token_program = *ctx.accounts.mint.to_account_info().owner;
+    require!(
+        is_supported_token_program(&token_program),
+        StackError::UnsupportedTokenProgram
+    );
     require_keys_eq!(
         ctx.accounts.holder_token_account.key(),
-        derive_ata(&owner_key, &mint_key),
+        derive_ata(&owner_key, &mint_key, &token_program),
         StackError::NotHoldersAta
     );
     require!(
@@ -88,26 +102,9 @@ pub fn handler(ctx: Context<Claim>) -> Result<()> {
         StackError::ClaimTooSoon
     );
 
-    let pulled = {
-        let deposit_info = ctx.accounts.deposit_vault.to_account_info();
-        pull_pump_fee(&deposit_info, &mint_key)?
-    };
+    let balance = read_token_amount(&ctx.accounts.holder_token_account.to_account_info())?;
     let pool = &mut ctx.accounts.loyalty_pool;
-    collect_fee(pool, pulled);
-    if pulled > 0 {
-        emit!(FeeCollected {
-            mint: mint_key,
-            amount: pulled,
-            acc_reward_per_share: pool.acc_reward_per_share,
-            total_weighted_shares: pool.total_weighted_shares,
-            total_collected: pool.total_collected,
-            undistributed: pool.undistributed,
-            timestamp: now,
-        });
-    }
-
     let registration = &mut ctx.accounts.registration;
-    let balance = ctx.accounts.holder_token_account.amount;
     touch_registration(registration, pool);
     let previous_weight = registration.weighted_shares;
     refresh_weight(registration, pool, balance, now);

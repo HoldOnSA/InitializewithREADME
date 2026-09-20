@@ -14,22 +14,20 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-# Deliberately NOT anchor-spl/idl-build: in 0.30.1 it unconditionally
-# references crate::token_interface types, which only exist behind the
-# token_2022 feature we're not enabling (see the anchor-spl dependency note
-# below) - a bug in that release when idl-build and token_2022 are decoupled.
 idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
 # `init-if-needed` is used for the Registration PDA, created lazily by the
 # indexer authority on a wallet's first marker-SOL transfer.
+#
+# No `anchor-spl` dependency: it doesn't support reading a token account
+# under either program without pulling spl-associated-token-account ->
+# spl-token-2022 -> a transitive dependency graph (spl-pod's zk-token-sdk)
+# pinned to a newer solana-program major version than anchor-lang 0.30.1's,
+# which fails to compile at current crates.io-latest-compatible versions.
+# `sync`/`claim`/`donate` instead verify a holder's ATA and read its balance
+# manually against public, stable constants and the shared base
+# token-account layout (see `ata.rs`), which needs none of that and, unlike
+# `anchor_spl::token::TokenAccount`, works for both legacy SPL Token and
+# Token-2022 mints.
 anchor-lang = { version = "0.30.1", features = ["init-if-needed"] }
-# `TokenAccount` deserialization only. Deliberately NOT the `associated_token`
-# feature: it pulls spl-associated-token-account -> spl-token-2022 -> a
-# transitive dependency graph (spl-pod's zk-token-sdk) pinned to a newer
-# solana-program major version than anchor-lang 0.30.1's, which fails to
-# compile at current crates.io-latest-compatible versions. `sync`/`claim`
-# instead verify a holder's ATA manually against the well-known, stable ATA
-# program ID and seed scheme (see `pumpfun.rs`-adjacent `ata.rs`), which
-# needs none of that.
-anchor-spl = { version = "0.30.1", default-features = false, features = ["token"] }

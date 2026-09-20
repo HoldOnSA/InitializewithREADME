@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::TokenAccount;
 
-use crate::ata::derive_ata;
+use crate::ata::{derive_ata, is_supported_token_program, read_token_amount};
 use crate::constants::*;
 use crate::errors::StackError;
 use crate::events::WeightSynced;
@@ -13,7 +12,9 @@ pub struct Sync<'info> {
     /// Permissionless. Anyone may refresh anyone's weight.
     pub cranker: Signer<'info>,
 
-    /// CHECK: identity/seed for this token only.
+    /// CHECK: identity/seed for this token only; also read directly for its
+    /// owning program, to pick the right token program (legacy vs
+    /// Token-2022) - never deserialized as mint data.
     pub mint: UncheckedAccount<'info>,
 
     /// CHECK: identity/seed only, whichever wallet's weight is being synced.
@@ -43,11 +44,16 @@ pub struct Sync<'info> {
     )]
     pub registration: Account<'info, Registration>,
 
-    /// The owner's real SPL balance for this mint - the only source of
-    /// truth for weight. Verified in the handler (see `ata::derive_ata`) to
-    /// genuinely be `owner`'s own canonical ATA for this exact mint, so
-    /// nobody can substitute a bigger balance.
-    pub holder_token_account: Account<'info, TokenAccount>,
+    /// CHECK: the owner's real token account for this mint - verified in the
+    /// handler (see `ata::derive_ata`) to genuinely be `owner`'s own
+    /// canonical ATA under whichever token program actually owns `mint`
+    /// (legacy SPL Token or Token-2022), so nobody can substitute a bigger
+    /// balance. Not typed as `Account<TokenAccount>`: that type only
+    /// deserializes the legacy layout at an exact 165-byte length, which
+    /// fails on real Token-2022 accounts carrying extensions (e.g. every ATA
+    /// the current ATA program creates, which always adds `ImmutableOwner`).
+    /// Balance is read manually instead (`ata::read_token_amount`).
+    pub holder_token_account: UncheckedAccount<'info>,
 }
 
 /// Re-price a registration's weight from `owner`'s live token balance.
@@ -65,12 +71,17 @@ pub fn handler(ctx: Context<Sync>) -> Result<()> {
     let mint_key = ctx.accounts.token_config.mint;
     let owner_key = ctx.accounts.registration.owner;
 
+    let token_program = *ctx.accounts.mint.to_account_info().owner;
+    require!(
+        is_supported_token_program(&token_program),
+        StackError::UnsupportedTokenProgram
+    );
     require_keys_eq!(
         ctx.accounts.holder_token_account.key(),
-        derive_ata(&owner_key, &mint_key),
+        derive_ata(&owner_key, &mint_key, &token_program),
         StackError::NotHoldersAta
     );
-    let balance = ctx.accounts.holder_token_account.amount;
+    let balance = read_token_amount(&ctx.accounts.holder_token_account.to_account_info())?;
 
     let pool = &mut ctx.accounts.loyalty_pool;
     let registration = &mut ctx.accounts.registration;

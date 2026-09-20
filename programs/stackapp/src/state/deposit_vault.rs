@@ -8,8 +8,8 @@ use anchor_lang::prelude::*;
 /// transfer was for which token. Program-owned and program-signed (via
 /// `invoke_signed` on these same seeds), the same pattern the old design
 /// used for `CurveVault`: it holds real lamports directly as its own
-/// account balance, both the registration markers and (once wired) whatever
-/// `collect_creator_fee` pays out.
+/// account balance - both the registration markers and whatever `donate`
+/// voluntarily routes in.
 #[account]
 #[derive(InitSpace, Debug)]
 pub struct DepositVault {

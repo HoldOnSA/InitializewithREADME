@@ -7,7 +7,6 @@ pub mod events;
 pub mod instructions;
 pub mod logic;
 pub mod math;
-pub mod pumpfun;
 pub mod state;
 
 use instructions::*;
@@ -49,9 +48,14 @@ pub mod stackapp {
         instructions::sync::handler(ctx)
     }
 
-    /// Pull in newly available pump.fun fee, sync the caller's own weight,
-    /// then pay out their accumulator share.
+    /// Sync the caller's own weight, then pay out their accumulator share.
     pub fn claim(ctx: Context<Claim>) -> Result<()> {
         instructions::claim::handler(ctx)
+    }
+
+    /// Permissionless: voluntarily route lamports into a token's pool. The
+    /// only source of real fee revenue - see `SECURITY_NOTES.md`.
+    pub fn donate(ctx: Context<Donate>, amount: u64) -> Result<()> {
+        instructions::donate::handler(ctx, amount)
     }
 }

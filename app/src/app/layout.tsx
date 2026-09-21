@@ -4,9 +4,9 @@ import { Providers } from "./providers";
 import { DevnetBanner, Footer, Nav } from "@/components/Chrome";
 
 export const metadata: Metadata = {
-  title: "StackApp — tenure-weighted launchpad (devnet)",
+  title: "StackApp — pump.fun loyalty layer (devnet)",
   description:
-    "A devnet prototype launchpad where holding longer is rewarded and leaving early funds the people who stayed.",
+    "A devnet prototype loyalty layer on real pump.fun tokens: register your wallet, and holding longer earns a bigger tenure-weighted share of creator donations.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

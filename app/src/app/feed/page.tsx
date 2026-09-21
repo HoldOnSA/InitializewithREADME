@@ -9,12 +9,10 @@ import { ErrorNote, Spinner } from "@/components/ui";
 
 const FILTERS: { key: string; label: string; kinds: string[] }[] = [
   { key: "all", label: "Everything", kinds: [] },
-  { key: "buys", label: "Buys", kinds: ["BuyExecuted"] },
-  { key: "exits", label: "Sells & transfers", kinds: ["ExitExecuted"] },
-  { key: "tax", label: "Tax → pool", kinds: ["TaxCollected"] },
-  { key: "claims", label: "Pool claims", kinds: ["PoolClaimed"] },
-  { key: "tiers", label: "Tier-ups", kinds: ["TierUp", "ReputationUpdated"] },
-  { key: "launches", label: "Launches", kinds: ["LaunchInitialized"] },
+  { key: "registrations", label: "Registrations", kinds: ["MintRegistered", "WalletRegistered"] },
+  { key: "syncs", label: "Weight syncs", kinds: ["WeightSynced"] },
+  { key: "donations", label: "Donations", kinds: ["FeeCollected"] },
+  { key: "claims", label: "Claims", kinds: ["RewardClaimed"] },
 ];
 
 const MAX_ROWS = 400;
@@ -113,7 +111,7 @@ export default function FeedPage() {
               {event.data.timestamp ? ago(event.data.timestamp) : `slot ${event.slot}`}
             </span>
             <span className="min-w-0 flex-1 text-slate-300">
-              <EventLine event={event} decimals={6} />
+              <EventLine event={event} />
             </span>
             {event.data.mint ? (
               <span className="hidden shrink-0 font-mono text-[11px] text-slate-600 sm:inline">

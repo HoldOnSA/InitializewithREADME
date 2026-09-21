@@ -1,8 +1,8 @@
 /**
  * Typed client for the Python indexer.
  *
- * NOTE: this Next.js app is optional. The indexer now serves the same four
- * pages itself in Python (no Node required) - see indexer/stackapp_indexer/web.
+ * NOTE: this Next.js app is optional. The indexer now serves the same pages
+ * itself in Python (no Node required) - see indexer/stackapp_indexer/web.
  * The JSON API lives under /api because the bare paths are those HTML pages.
  */
 
@@ -10,8 +10,6 @@ export const INDEXER_URL =
   process.env.NEXT_PUBLIC_INDEXER_URL ?? "http://127.0.0.1:8787";
 export const INDEXER_WS =
   process.env.NEXT_PUBLIC_INDEXER_WS ?? "ws://127.0.0.1:8787/ws";
-
-export type TaxCurvePoint = { secondsHeld: number; taxBps: number };
 
 export type PoolView = {
   totalCollected: number;
@@ -26,79 +24,37 @@ export type PoolView = {
 export type TokenView = {
   mint: string;
   creator: string;
-  launchTimestamp: number;
+  registeredAt: number;
   ageSeconds: number;
-  vestDurationSeconds: number;
-  decimals: number;
-  taxCurve: TaxCurvePoint[];
-  currentOpeningTaxBps: number;
-  curve: {
-    virtualSolReserves: number;
-    virtualTokenReserves: number;
-    realSolReserves: number;
-    tokensSold: number;
-    spotPriceLamports: number;
-    marketCapLamports: number;
-  };
+  depositVault: string;
+  vaultLamports: number;
+  registrationMarkerLamports: number;
   pool: PoolView;
-  holderCount: number;
-  totalBuyVolumeTokens: number;
-  totalSellVolumeTokens: number;
-  poolAccount: string;
-  curveVault: string;
+  registrationCount: number;
+  pendingRegistrationCount: number;
 };
 
-export type LotView = {
-  original: number;
-  remaining: number;
-  locked: number;
-  released: number;
-  buyTimestamp: number;
-  ageSeconds: number;
-  vestedBps: number;
-  claimableNow: number;
-  currentTaxBps: number;
-  tenureMultiplierBps: number;
-};
-
-export type PositionView = {
+export type RegistrationView = {
   mint: string;
   owner: string;
-  lots: LotView[];
-  totalRemaining: number;
-  totalLocked: number;
-  spendable: number;
-  vestedClaimed: number;
-  claimableVestedNow: number;
-  unlockProgressBps: number;
+  registeredAt: number;
+  ageSeconds: number;
+  tenureMultiplierBps: number;
   weightedShares: number;
   poolSharePpm: number;
   projectedClaimable: number;
   lifetimeRewardsClaimed: number;
   claimEligibleAtSlot: number;
   claimEligible: boolean;
-  costBasisLamports: number;
-  totalBought: number;
-  totalSold: number;
-  firstBuyTimestamp: number;
-  averageHoldSeconds: number;
 };
 
-export type PassportView = {
+export type PendingRegistration = {
+  mint: string;
   owner: string;
-  score: string;
-  tier: number;
-  tierName: string;
-  nextTierAt: string | null;
-  tokensHeldToMaturity: number;
-  totalTenureWeightedVolume: string;
-  firstSeenTimestamp: number;
-  lastUpdateTimestamp: number;
-  activePositions: number;
-  averageHoldSeconds: number;
-  capitalAtRiskLamports: number;
-  perks: string[];
-  positions: PositionView[];
+  amount: number;
+  slot: number;
+  signature: string;
+  detectedAt: number;
 };
 
 export type FeedEvent = {
@@ -111,11 +67,11 @@ export type FeedEvent = {
 
 export type PdaSet = {
   programId: string;
+  globalConfig: { address: string; bump: number };
   tokenConfig: { address: string; bump: number };
   loyaltyPool: { address: string; bump: number };
-  curveVault: { address: string; bump: number };
-  position?: { address: string; bump: number };
-  reputation?: { address: string; bump: number };
+  depositVault: { address: string; bump: number };
+  registration?: { address: string; bump: number };
 };
 
 export class IndexerError extends Error {
@@ -148,12 +104,13 @@ export const api = {
   health: () => get<Record<string, any>>("/api/health"),
   tokens: () => get<TokenView[]>("/api/tokens"),
   token: (mint: string) => get<TokenView>(`/api/tokens/${mint}`),
-  holders: (mint: string, limit = 50) =>
-    get<PositionView[]>(`/api/tokens/${mint}/holders?limit=${limit}`),
-  positions: (owner: string) => get<PositionView[]>(`/api/positions/${owner}`),
-  position: (mint: string, owner: string) =>
-    get<PositionView>(`/api/positions/${mint}/${owner}`),
-  passport: (wallet: string) => get<PassportView>(`/api/passport/${wallet}`),
+  registrationsForMint: (mint: string, limit = 50) =>
+    get<RegistrationView[]>(`/api/tokens/${mint}/registrations?limit=${limit}`),
+  pendingForMint: (mint: string) => get<PendingRegistration[]>(`/api/tokens/${mint}/pending`),
+  registrationsForOwner: (owner: string) =>
+    get<RegistrationView[]>(`/api/registrations/${owner}`),
+  registration: (mint: string, owner: string) =>
+    get<RegistrationView>(`/api/registrations/${mint}/${owner}`),
   feed: (opts: { limit?: number; mint?: string; owner?: string; kinds?: string[] } = {}) => {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));

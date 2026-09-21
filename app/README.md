@@ -1,11 +1,11 @@
 # stackapp-web
 
-Next.js + Tailwind frontend. Devnet only.
+Next.js + Tailwind frontend for StackApp's pump.fun loyalty layer. Devnet only.
 
-> **Optional.** The indexer serves these same four pages itself, in Python, with
+> **Optional.** The indexer serves these same pages itself, in Python, with
 > no Node toolchain at all — see `indexer/stackapp_indexer/web/`. That is the
-> supported path. This app exists because the original spec asked for it, and it
-> is kept in sync as a second front end for anyone who wants the React version.
+> supported path. This app exists as a second front end for anyone who wants
+> the React version, and is kept in sync with it.
 >
 > The JSON API lives under `/api` (the bare paths are the Python-served pages).
 
@@ -25,19 +25,23 @@ cd ../indexer && python -m stackapp_indexer --mock
 
 | Route | What it shows |
 |---|---|
-| `/` | every live launch, with its tax curve, price and pool size |
-| `/launch` | create a `TokenConfig`: tax-curve presets or a hand-edited curve, vest duration, and a live preview |
-| `/token/[mint]` | curve state, your position with per-lot unlock progress and current tax, pool size, projected claimable share, holders by tenure weight |
-| `/passport/[wallet]` | reputation tier, progress to the next one, tokens held to maturity, average hold time, what the tier unlocks |
+| `/` | every registered token, plus a register-a-token panel |
+| `/token/[mint]` | pool, your registration, pending marker candidates, registrations by weight |
 | `/feed` | live event feed over WebSocket, newest first, filterable |
+
+StackApp doesn't run the trade for these tokens - pump.fun does, against
+real, transferable SPL tokens. There's no bonding curve, tax curve, vesting
+or reputation passport here anymore; a registration's weight is just its
+live pump.fun balance × how long it's been registered.
 
 ## Signing
 
-All signing happens client-side through the wallet adapter (Phantom / Solflare
-on devnet). The app never holds a private key. The only extra signer it ever
-uses is a throwaway mint keypair generated in the browser for a new launch,
-which signs one transaction and is then discarded — the program only ever uses
-that address as a PDA seed.
+All signing happens client-side through the wallet adapter (Phantom /
+Solflare on devnet). The app never holds a private key - including for
+`register_mint` and `write_registration`, which are authority-gated on chain
+(`GlobalConfig.authority`) but built and signed exactly like every other
+action here: whichever wallet you connect. If that isn't the real authority,
+the transaction just fails on chain.
 
 ## Instruction building
 
@@ -53,13 +57,16 @@ that can silently drift from the deployed program. The account order in each
 builder mirrors the `#[derive(Accounts)]` struct field order exactly — **if you
 reorder fields in the Rust, you must reorder them here.**
 
-`validateTaxCurve` mirrors the program's own validation so the launch form can
-reject a bad curve before it costs a transaction.
+`sync`/`claim` need the caller's canonical ATA under whichever token program
+actually owns the mint (real pump.fun mints split roughly 14:1 Token-2022 vs
+legacy SPL Token) - the token page resolves that by reading the mint
+account's owner directly, never assumed, before building either instruction.
 
 ## Notes
 
 - `src/lib/api.ts` is the only thing that talks to the indexer, and it surfaces a
   readable error if the indexer is not running.
-- `u128` values arrive as strings; do not `Number()` them without thinking.
+- `u128` values (`accRewardPerShare`) arrive as strings; do not `Number()` them
+  without thinking.
 - The wallet button is dynamically imported with `ssr: false` — it touches
   `window` on mount.

@@ -8,13 +8,6 @@ export function sol(lamports: number | bigint, digits = 4): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: digits })} SOL`;
 }
 
-export function tokens(baseUnits: number | bigint, decimals = 6, digits = 2): string {
-  const value = Number(baseUnits) / 10 ** decimals;
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(digits)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(digits)}K`;
-  return value.toLocaleString(undefined, { maximumFractionDigits: digits });
-}
-
 export function bps(value: number, digits = 2): string {
   const pct = value / 100;
   return `${pct.toLocaleString(undefined, { maximumFractionDigits: digits })}%`;
@@ -57,13 +50,6 @@ export function shortKey(key: string, lead = 4, tail = 4): string {
   if (!key) return "-";
   if (key.length <= lead + tail + 1) return key;
   return `${key.slice(0, lead)}…${key.slice(-tail)}`;
-}
-
-export function priceLabel(lamportsPerToken: number): string {
-  if (lamportsPerToken >= LAMPORTS_PER_SOL / 1000) {
-    return `${(lamportsPerToken / LAMPORTS_PER_SOL).toFixed(6)} SOL`;
-  }
-  return `${lamportsPerToken.toLocaleString()} lamports`;
 }
 
 export function isValidBase58Key(value: string): boolean {

@@ -70,13 +70,14 @@ function explain(cause: unknown): string {
   const raw = cause instanceof Error ? cause.message : String(cause);
   const known: [RegExp, string][] = [
     [/ClaimTooSoon/, "Too soon to claim - a few slots must pass after any balance increase."],
-    [/InsufficientSpendable/, "Not enough unlocked balance. Claim vested tokens first."],
     [/NothingToClaim/, "Nothing to claim right now."],
-    [/LotCapacityExceeded/, "This position is at its lot limit. Compact lots first."],
-    [/NotMatured/, "This position has not been held long enough yet."],
-    [/ExitedBeforeMaturity/, "Too much of this position was sold for it to count as matured."],
-    [/SlippageExceeded/, "Price moved past your limit. Try again."],
-    [/TaxCurveNotMonotonic/, "The tax curve may never rise with time held."],
+    [/ZeroDonation/, "Enter a donation amount greater than zero."],
+    [/NotHoldersAta/, "That token account is not your own canonical associated token account for this mint."],
+    [/UnsupportedTokenProgram/, "This mint is owned by a token program this prototype does not support."],
+    [/InvalidTokenAccount/, "That token account is missing or uninitialized."],
+    [/AccountAlreadyInitialized/, "This wallet is already registered for this token."],
+    [/has_one|ConstraintHasOne/, "Wrong signer - this action needs the program's current authority."],
+    [/AccountNotInitialized/, "Not registered yet - send the marker amount first, then wait for it to be written."],
     [/insufficient lamports|Attempt to debit/, "Not enough devnet SOL. Airdrop some first."],
     [/User rejected|rejected the request/i, "Rejected in the wallet."],
   ];

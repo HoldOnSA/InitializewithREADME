@@ -12,8 +12,7 @@ const WalletMultiButton = dynamic(
 );
 
 const NAV = [
-  { href: "/", label: "Launches" },
-  { href: "/launch", label: "Launch" },
+  { href: "/", label: "Tokens" },
   { href: "/feed", label: "Feed" },
 ];
 
@@ -71,11 +70,16 @@ export function Footer() {
     <footer className="mt-16 border-t border-ink-800 px-4 py-8 text-xs text-slate-500">
       <div className="mx-auto max-w-6xl space-y-1">
         <p>
-          StackApp is a devnet prototype of a tenure-weighted launchpad. Going to mainnet
-          would require a full security audit and separate legal review before handling any
-          real user funds.
+          StackApp is a devnet prototype of a loyalty layer on real pump.fun tokens. Going to
+          mainnet would require a full security audit and separate legal review before handling
+          any real user funds. See <code>SECURITY_NOTES.md</code> in the repo for what is and
+          isn&rsquo;t trust-minimized today.
         </p>
-        <p>Signing happens client-side in your wallet. No private keys are ever sent anywhere.</p>
+        <p>
+          Signing happens client-side in your wallet - including for the authority-gated
+          actions (register a token, write a registration), which are just signed by whichever
+          wallet you connect. No private keys are ever sent anywhere.
+        </p>
       </div>
     </footer>
   );

@@ -8,3 +8,5 @@ dist
 test-ledger
 **/*.rs.bk
 .DS_Store
+next-env.d.ts
+*.tsbuildinfo

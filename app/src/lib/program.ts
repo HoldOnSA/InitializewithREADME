@@ -3,14 +3,17 @@
  *
  * Instructions are assembled here and signed by the user's wallet adapter. The
  * app never sees a private key and never sends one anywhere - see README,
- * "Out of scope".
+ * "Signing". This includes `registerMint` and `writeRegistration`, which are
+ * authority-gated on chain (`GlobalConfig.authority`) but built and signed
+ * exactly like everything else: whichever wallet the operator connects. If
+ * that isn't the real authority, the transaction just fails on chain.
  *
  * Anchor's wire format is simple enough to build directly:
  *   data = sha256("global:<snake_case_name>")[0..8] ++ borsh(args)
  * which avoids shipping a generated IDL that can silently drift from the
  * deployed program. The layouts here mirror `programs/stackapp/src` exactly,
- * and `indexer/stackapp_indexer/layouts.py` mirrors the same structs for
- * decoding.
+ * and `indexer/stackapp_indexer/txbuild.py` builds the same instructions
+ * server-side for the Python UI.
  */
 
 import { sha256 } from "@noble/hashes/sha256";
@@ -21,21 +24,29 @@ import {
 } from "@solana/web3.js";
 
 export const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID ?? "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+  process.env.NEXT_PUBLIC_PROGRAM_ID ?? "BBAbsh9UHVt7xiqeuVo23R4MPbNzXXNp2gsLwu6jAa1M"
 );
 
+const SEED_GLOBAL_CONFIG = new TextEncoder().encode("global_config");
 const SEED_CONFIG = new TextEncoder().encode("config");
 const SEED_POOL = new TextEncoder().encode("pool");
-const SEED_POSITION = new TextEncoder().encode("position");
-const SEED_REPUTATION = new TextEncoder().encode("reputation");
-const SEED_CURVE_VAULT = new TextEncoder().encode("curve_vault");
+const SEED_DEPOSIT_VAULT = new TextEncoder().encode("deposit");
+const SEED_REGISTRATION = new TextEncoder().encode("registration");
 
 export const BPS_DENOMINATOR = 10_000;
 export const MIN_CLAIM_DELAY_SLOTS = 4;
-export const MAX_TAX_BPS = 9_000;
-export const MAX_TAX_CURVE_POINTS = 8;
+export const TENURE_TIER_SECONDS = [60, 600, 1_800] as const; // 1 min, 10 min, 30 min
+export const TENURE_TIER_MULTIPLIER_BPS = [10_000, 12_500, 15_000, 20_000] as const;
+export const REGISTRATION_MARKER_LAMPORTS = 2_500_000n; // 0.0025 SOL
 
-export type TaxPoint = { secondsHeld: number | bigint; taxBps: number };
+/** Legacy SPL Token and Token-2022 - real pump.fun mints split roughly 14:1
+ * Token-2022 vs legacy (verified against sampled mainnet tokens), so the
+ * owning program is always read from the mint account, never assumed. */
+export const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+export const TOKEN_2022_PROGRAM_ID = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+);
 
 /* -------------------------------------------------------------------------- */
 /* borsh                                                                       */
@@ -44,22 +55,13 @@ export type TaxPoint = { secondsHeld: number | bigint; taxBps: number };
 class Encoder {
   private parts: Uint8Array[] = [];
 
+  bytes(value: Uint8Array): this {
+    this.parts.push(value);
+    return this;
+  }
+
   u8(value: number): this {
     this.parts.push(Uint8Array.of(value & 0xff));
-    return this;
-  }
-
-  u16(value: number): this {
-    const buf = new Uint8Array(2);
-    new DataView(buf.buffer).setUint16(0, value, true);
-    this.parts.push(buf);
-    return this;
-  }
-
-  u32(value: number): this {
-    const buf = new Uint8Array(4);
-    new DataView(buf.buffer).setUint32(0, value, true);
-    this.parts.push(buf);
     return this;
   }
 
@@ -70,15 +72,8 @@ class Encoder {
     return this;
   }
 
-  i64(value: bigint | number): this {
-    const buf = new Uint8Array(8);
-    new DataView(buf.buffer).setBigInt64(0, BigInt(value), true);
-    this.parts.push(buf);
-    return this;
-  }
-
-  bytes(value: Uint8Array): this {
-    this.parts.push(value);
+  pubkey(value: PublicKey): this {
+    this.parts.push(value.toBytes());
     return this;
   }
 
@@ -103,6 +98,10 @@ export function discriminator(name: string): Uint8Array {
 /* PDAs                                                                        */
 /* -------------------------------------------------------------------------- */
 
+export function globalConfigPda(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([SEED_GLOBAL_CONFIG], PROGRAM_ID);
+}
+
 export function tokenConfigPda(mint: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([SEED_CONFIG, mint.toBytes()], PROGRAM_ID);
 }
@@ -111,23 +110,42 @@ export function loyaltyPoolPda(mint: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([SEED_POOL, mint.toBytes()], PROGRAM_ID);
 }
 
-export function curveVaultPda(mint: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([SEED_CURVE_VAULT, mint.toBytes()], PROGRAM_ID);
+export function depositVaultPda(mint: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([SEED_DEPOSIT_VAULT, mint.toBytes()], PROGRAM_ID);
 }
 
-export function positionPda(mint: PublicKey, owner: PublicKey): [PublicKey, number] {
+export function registrationPda(mint: PublicKey, owner: PublicKey): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [SEED_POSITION, mint.toBytes(), owner.toBytes()],
+    [SEED_REGISTRATION, mint.toBytes(), owner.toBytes()],
     PROGRAM_ID
   );
 }
 
-export function reputationPda(owner: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync([SEED_REPUTATION, owner.toBytes()], PROGRAM_ID);
+/** `owner`'s canonical ATA for `mint`, under whichever token program actually
+ * owns the mint (`tokenProgram` - read it off the mint account, never
+ * assumed; see `resolveTokenProgram` in `api.ts`-adjacent call sites). */
+export function deriveAta(owner: PublicKey, mint: PublicKey, tokenProgram: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBytes(), tokenProgram.toBytes(), mint.toBytes()],
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  )[0];
 }
 
 /* -------------------------------------------------------------------------- */
-/* instructions                                                                */
+/* tenure math - mirrors math/tenure.rs                                       */
+/* -------------------------------------------------------------------------- */
+
+export function tenureMultiplierBps(secondsHeld: number): number {
+  const held = Math.max(secondsHeld, 0);
+  let mult: number = TENURE_TIER_MULTIPLIER_BPS[0];
+  TENURE_TIER_SECONDS.forEach((threshold, i) => {
+    if (held >= threshold) mult = TENURE_TIER_MULTIPLIER_BPS[i + 1];
+  });
+  return mult;
+}
+
+/* -------------------------------------------------------------------------- */
+/* instructions                                                               */
 /* -------------------------------------------------------------------------- */
 
 function ix(keys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[], data: Buffer) {
@@ -138,309 +156,137 @@ const signer = (pubkey: PublicKey, isWritable = true) => ({ pubkey, isSigner: tr
 const ro = (pubkey: PublicKey) => ({ pubkey, isSigner: false, isWritable: false });
 const rw = (pubkey: PublicKey) => ({ pubkey, isSigner: false, isWritable: true });
 
-export function initializeLaunchIx(params: {
+export function initializeConfigIx(params: {
+  payer: PublicKey;
+  authority: PublicKey;
+}): TransactionInstruction {
+  const [globalConfig] = globalConfigPda();
+  return ix(
+    [signer(params.payer), rw(globalConfig), ro(SystemProgram.programId)],
+    new Encoder().bytes(discriminator("initialize_config")).pubkey(params.authority).finish()
+  );
+}
+
+export function updateAuthorityIx(params: {
+  authority: PublicKey;
+  newAuthority: PublicKey;
+}): TransactionInstruction {
+  const [globalConfig] = globalConfigPda();
+  return ix(
+    [signer(params.authority, false), rw(globalConfig)],
+    new Encoder().bytes(discriminator("update_authority")).pubkey(params.newAuthority).finish()
+  );
+}
+
+export function registerMintIx(params: {
+  authority: PublicKey;
+  mint: PublicKey;
   creator: PublicKey;
-  mint: PublicKey;
-  taxCurve: TaxPoint[];
-  vestDurationSeconds: number | bigint;
-  virtualSolReserves?: bigint;
-  virtualTokenReserves?: bigint;
-  decimals?: number;
 }): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
+  const [globalConfig] = globalConfigPda();
+  const [tokenConfig] = tokenConfigPda(params.mint);
   const [pool] = loyaltyPoolPda(params.mint);
-  const [vault] = curveVaultPda(params.mint);
-
-  const encoder = new Encoder()
-    .bytes(discriminator("initialize_launch"))
-    .u32(params.taxCurve.length);
-  for (const point of params.taxCurve) {
-    encoder.i64(point.secondsHeld).u16(point.taxBps);
-  }
-  encoder
-    .i64(params.vestDurationSeconds)
-    .u64(params.virtualSolReserves ?? 0n)
-    .u64(params.virtualTokenReserves ?? 0n)
-    .u8(params.decimals ?? 6);
+  const [vault] = depositVaultPda(params.mint);
 
   return ix(
     [
-      signer(params.creator),
+      signer(params.authority),
+      ro(globalConfig),
       ro(params.mint),
-      rw(config),
+      rw(tokenConfig),
       rw(pool),
       rw(vault),
       ro(SystemProgram.programId),
     ],
-    encoder.finish()
+    new Encoder().bytes(discriminator("register_mint")).pubkey(params.creator).finish()
   );
 }
 
-export function buyIx(params: {
-  buyer: PublicKey;
+export function writeRegistrationIx(params: {
+  authority: PublicKey;
+  owner: PublicKey;
   mint: PublicKey;
-  amount: bigint;
-  maxCostLamports?: bigint;
 }): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
-  const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.buyer);
-  const [vault] = curveVaultPda(params.mint);
-
-  const data = new Encoder()
-    .bytes(discriminator("buy"))
-    .u64(params.amount)
-    .u64(params.maxCostLamports ?? 0n)
-    .finish();
+  const [globalConfig] = globalConfigPda();
+  const [tokenConfig] = tokenConfigPda(params.mint);
+  const [vault] = depositVaultPda(params.mint);
+  const [registration] = registrationPda(params.mint, params.owner);
 
   return ix(
     [
-      signer(params.buyer),
+      signer(params.authority, false),
+      ro(globalConfig),
+      ro(params.owner),
       ro(params.mint),
-      rw(config),
-      rw(pool),
-      rw(position),
+      ro(tokenConfig),
       rw(vault),
+      rw(registration),
       ro(SystemProgram.programId),
     ],
-    data
+    new Encoder().bytes(discriminator("write_registration")).finish()
   );
 }
 
-export function claimVestedIx(params: {
-  owner: PublicKey;
-  mint: PublicKey;
-}): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
-  const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.owner);
-
-  return ix(
-    [signer(params.owner, false), ro(params.mint), ro(config), rw(pool), rw(position)],
-    new Encoder().bytes(discriminator("claim_vested")).finish()
-  );
-}
-
-export function sellIx(params: {
-  seller: PublicKey;
-  mint: PublicKey;
-  amount: bigint;
-  minProceedsLamports?: bigint;
-}): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
-  const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.seller);
-  const [vault] = curveVaultPda(params.mint);
-
-  const data = new Encoder()
-    .bytes(discriminator("sell"))
-    .u64(params.amount)
-    .u64(params.minProceedsLamports ?? 0n)
-    .finish();
-
-  return ix(
-    [
-      signer(params.seller),
-      ro(params.mint),
-      rw(config),
-      rw(pool),
-      rw(position),
-      rw(vault),
-      ro(SystemProgram.programId),
-    ],
-    data
-  );
-}
-
-export function transferPositionIx(params: {
-  sender: PublicKey;
-  recipient: PublicKey;
-  mint: PublicKey;
-  amount: bigint;
-}): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
-  const [pool] = loyaltyPoolPda(params.mint);
-  const [from] = positionPda(params.mint, params.sender);
-  const [to] = positionPda(params.mint, params.recipient);
-
-  const data = new Encoder()
-    .bytes(discriminator("transfer_position"))
-    .u64(params.amount)
-    .finish();
-
-  return ix(
-    [
-      signer(params.sender),
-      ro(params.mint),
-      ro(params.recipient),
-      rw(config),
-      rw(pool),
-      rw(from),
-      rw(to),
-      ro(SystemProgram.programId),
-    ],
-    data
-  );
-}
-
-export function donateToPoolIx(params: {
-  owner: PublicKey;
-  mint: PublicKey;
-  amount: bigint;
-}): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
-  const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.owner);
-
-  const data = new Encoder()
-    .bytes(discriminator("donate_to_pool"))
-    .u64(params.amount)
-    .finish();
-
-  return ix(
-    [signer(params.owner, false), ro(params.mint), rw(config), rw(pool), rw(position)],
-    data
-  );
-}
-
-export function claimPoolShareIx(params: {
-  owner: PublicKey;
-  mint: PublicKey;
-}): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
-  const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.owner);
-
-  return ix(
-    [signer(params.owner, false), ro(params.mint), ro(config), rw(pool), rw(position)],
-    new Encoder().bytes(discriminator("claim_pool_share")).finish()
-  );
-}
-
-export function updateReputationIx(params: {
-  owner: PublicKey;
-  mint: PublicKey;
-}): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
-  const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.owner);
-  const [reputation] = reputationPda(params.owner);
-
-  return ix(
-    [
-      signer(params.owner),
-      ro(params.mint),
-      ro(config),
-      rw(pool),
-      rw(position),
-      rw(reputation),
-      ro(SystemProgram.programId),
-    ],
-    new Encoder().bytes(discriminator("update_reputation")).finish()
-  );
-}
-
-export function syncWeightIx(params: {
+export function syncIx(params: {
   cranker: PublicKey;
   owner: PublicKey;
   mint: PublicKey;
+  tokenProgram: PublicKey;
 }): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
+  const [tokenConfig] = tokenConfigPda(params.mint);
   const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.owner);
+  const [registration] = registrationPda(params.mint, params.owner);
+  const holderTokenAccount = deriveAta(params.owner, params.mint, params.tokenProgram);
 
   return ix(
     [
       signer(params.cranker, false),
       ro(params.mint),
       ro(params.owner),
-      ro(config),
+      ro(tokenConfig),
       rw(pool),
-      rw(position),
+      rw(registration),
+      ro(holderTokenAccount),
     ],
-    new Encoder().bytes(discriminator("sync_weight")).finish()
+    new Encoder().bytes(discriminator("sync")).finish()
   );
 }
 
-export function compactLotsIx(params: {
+export function claimIx(params: {
   owner: PublicKey;
   mint: PublicKey;
+  tokenProgram: PublicKey;
 }): TransactionInstruction {
-  const [config] = tokenConfigPda(params.mint);
+  const [tokenConfig] = tokenConfigPda(params.mint);
   const [pool] = loyaltyPoolPda(params.mint);
-  const [position] = positionPda(params.mint, params.owner);
+  const [registration] = registrationPda(params.mint, params.owner);
+  const [vault] = depositVaultPda(params.mint);
+  const holderTokenAccount = deriveAta(params.owner, params.mint, params.tokenProgram);
 
   return ix(
-    [signer(params.owner, false), ro(params.mint), ro(config), rw(pool), rw(position)],
-    new Encoder().bytes(discriminator("compact_lots")).finish()
+    [
+      signer(params.owner),
+      ro(params.mint),
+      ro(tokenConfig),
+      rw(pool),
+      rw(registration),
+      rw(vault),
+      ro(holderTokenAccount),
+    ],
+    new Encoder().bytes(discriminator("claim")).finish()
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* tax curve presets, mirrored from sim/stackapp_sim/__init__.py               */
-/* -------------------------------------------------------------------------- */
+export function donateIx(params: {
+  donor: PublicKey;
+  mint: PublicKey;
+  amount: bigint;
+}): TransactionInstruction {
+  const [pool] = loyaltyPoolPda(params.mint);
+  const [vault] = depositVaultPda(params.mint);
 
-export const TAX_CURVE_PRESETS: Record<
-  string,
-  { label: string; blurb: string; points: TaxPoint[] }
-> = {
-  diamond: {
-    label: "Diamond hands",
-    blurb: "30% to start, free after a week. The default shape.",
-    points: [
-      { secondsHeld: 0, taxBps: 3_000 },
-      { secondsHeld: 3_600, taxBps: 2_000 },
-      { secondsHeld: 86_400, taxBps: 1_000 },
-      { secondsHeld: 604_800, taxBps: 0 },
-    ],
-  },
-  gentle: {
-    label: "Gentle",
-    blurb: "10% to start. Discourages flipping without punishing it.",
-    points: [
-      { secondsHeld: 0, taxBps: 1_000 },
-      { secondsHeld: 3_600, taxBps: 500 },
-      { secondsHeld: 86_400, taxBps: 200 },
-      { secondsHeld: 604_800, taxBps: 0 },
-    ],
-  },
-  brutal: {
-    label: "Brutal",
-    blurb: "90% to start and never reaches zero. For long-horizon launches.",
-    points: [
-      { secondsHeld: 0, taxBps: 9_000 },
-      { secondsHeld: 3_600, taxBps: 6_000 },
-      { secondsHeld: 86_400, taxBps: 3_000 },
-      { secondsHeld: 2_592_000, taxBps: 500 },
-    ],
-  },
-  flat: {
-    label: "Flat",
-    blurb: "A constant 5%. No tenure incentive at all - useful as a control.",
-    points: [{ secondsHeld: 0, taxBps: 500 }],
-  },
-};
-
-/**
- * The same validation the program applies, so the form can reject a bad curve
- * before it costs a transaction. Mirrors `math::validate_tax_curve`.
- */
-export function validateTaxCurve(points: TaxPoint[]): string | null {
-  if (points.length === 0) return "A curve needs at least one point.";
-  if (points.length > MAX_TAX_CURVE_POINTS)
-    return `At most ${MAX_TAX_CURVE_POINTS} points.`;
-  if (Number(points[0].secondsHeld) !== 0)
-    return "The first point must be at 0 seconds held.";
-  for (let i = 0; i < points.length; i += 1) {
-    if (points[i].taxBps > MAX_TAX_BPS)
-      return `Tax cannot exceed ${MAX_TAX_BPS / 100}%.`;
-    if (points[i].taxBps < 0) return "Tax cannot be negative.";
-    if (i > 0) {
-      if (Number(points[i].secondsHeld) <= Number(points[i - 1].secondsHeld))
-        return "Points must increase in seconds held.";
-      if (points[i].taxBps > points[i - 1].taxBps)
-        return "Tax must never rise with time held - that would reward selling sooner.";
-    }
-  }
-  return null;
+  return ix(
+    [signer(params.donor), ro(params.mint), rw(pool), rw(vault), ro(SystemProgram.programId)],
+    new Encoder().bytes(discriminator("donate")).u64(params.amount).finish()
+  );
 }

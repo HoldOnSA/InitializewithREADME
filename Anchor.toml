@@ -7,10 +7,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-stackapp = "GGqhbbXPZg2GGZP1o7CUeNkqATybrDJbX7cxJiwEzaFL"
+stackapp = "BBAbsh9UHVt7xiqeuVo23R4MPbNzXXNp2gsLwu6jAa1M"
 
 [programs.localnet]
-stackapp = "GGqhbbXPZg2GGZP1o7CUeNkqATybrDJbX7cxJiwEzaFL"
+stackapp = "BBAbsh9UHVt7xiqeuVo23R4MPbNzXXNp2gsLwu6jAa1M"
 
 [registry]
 url = "https://api.apr.dev"

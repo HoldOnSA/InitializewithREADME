@@ -11,11 +11,15 @@ pub mod state;
 
 use instructions::*;
 
-// Placeholder - this is a genuinely new program (different accounts, different
-// instructions) built on a fresh branch, not an in-place upgrade of the old
-// independent-protocol deployment. Run `anchor keys sync` before the first
-// real build/deploy of this branch, same as any fresh Anchor program.
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+// A genuinely new program identity - different accounts, different
+// instructions - deployed fresh to devnet rather than upgrading the old
+// independent-protocol program in place. The account shapes changed too much
+// to share a program ID safely: Anchor discriminators are derived from a
+// struct's *name* alone, and this design reuses names like `TokenConfig` and
+// `LoyaltyPool` for structs with entirely different fields, so an in-place
+// upgrade risked the new code mis-reading a leftover old-shape account at a
+// colliding PDA.
+declare_id!("BBAbsh9UHVt7xiqeuVo23R4MPbNzXXNp2gsLwu6jAa1M");
 
 #[program]
 pub mod stackapp {

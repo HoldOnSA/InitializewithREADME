@@ -1,22 +1,41 @@
+@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;500;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Palette and type matched from origin/desktop-ui-real:index.html. */
 :root {
   color-scheme: dark;
 }
 
+*:focus-visible {
+  outline: 2px solid theme("colors.stack.DEFAULT");
+  outline-offset: 3px;
+  border-radius: 5px;
+}
+
+::selection {
+  background: rgba(53, 229, 255, 0.28);
+}
+
 body {
-  @apply bg-ink-950 text-slate-200 antialiased;
+  @apply bg-ink-950 font-body text-frost antialiased;
   background-image:
-    radial-gradient(60rem 40rem at 20% -10%, rgba(74, 222, 128, 0.07), transparent),
-    radial-gradient(50rem 30rem at 90% 0%, rgba(96, 165, 250, 0.06), transparent);
+    radial-gradient(56rem 38rem at 50% -14%, rgba(53, 229, 255, 0.11), transparent 62%),
+    radial-gradient(44rem 30rem at 92% 6%, rgba(29, 111, 224, 0.1), transparent 64%);
   background-attachment: fixed;
+}
+
+h1,
+h2,
+h3 {
+  @apply font-display;
 }
 
 @layer components {
   .card {
-    @apply rounded-xl border border-ink-700 bg-ink-900/70 p-5 backdrop-blur;
+    @apply rounded-2xl border border-ink-700 bg-ink-800/70 p-5 backdrop-blur;
   }
 
   .label {
@@ -24,25 +43,25 @@ body {
   }
 
   .stat {
-    @apply font-mono text-lg text-slate-100;
+    @apply font-mono text-lg text-frost;
   }
 
   .btn {
-    @apply rounded-lg px-4 py-2 text-sm font-medium transition
+    @apply rounded-full px-5 py-2.5 text-sm font-medium transition
            disabled:cursor-not-allowed disabled:opacity-40;
   }
 
   .btn-primary {
-    @apply btn bg-stack text-ink-950 hover:bg-emerald-300;
+    @apply btn bg-stack font-bold text-ink-950 hover:bg-[#5ceeff];
   }
 
   .btn-ghost {
-    @apply btn border border-ink-600 text-slate-300 hover:border-ink-500 hover:text-white;
+    @apply btn border border-ink-600 bg-transparent text-frost hover:border-stack-dim hover:text-stack;
   }
 
   .input {
-    @apply w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 font-mono text-sm
-           text-slate-100 outline-none focus:border-stack;
+    @apply w-full rounded-xl border border-ink-700 bg-ink-800 px-3 py-2 font-mono text-sm
+           text-frost outline-none placeholder:text-ink-500 focus:border-stack-dim;
   }
 
   .pill {
@@ -52,9 +71,10 @@ body {
 
 /* The wallet-adapter modal ships its own styles; nudge them to match. */
 .wallet-adapter-button-trigger {
-  background-color: #4ade80 !important;
-  color: #07090d !important;
-  border-radius: 0.5rem !important;
+  background-color: #35e5ff !important;
+  color: #03070c !important;
+  border-radius: 999px !important;
   height: 2.25rem !important;
   font-size: 0.875rem !important;
+  font-weight: 700 !important;
 }

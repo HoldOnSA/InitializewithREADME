@@ -29,10 +29,10 @@ export function DevnetBanner() {
 export function Nav() {
   const pathname = usePathname();
   return (
-    <header className="sticky top-0 z-30 border-b border-ink-700 bg-ink-950/85 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-ink-700 bg-ink-950/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid h-7 w-7 place-items-center rounded-md bg-stack text-sm font-bold text-ink-950">
+        <Link href="/" className="flex items-center gap-2 font-display font-bold tracking-tight text-frost">
+          <span className="grid h-7 w-7 place-items-center rounded-md2 bg-stack text-sm font-bold text-ink-950">
             S
           </span>
           <span>StackApp</span>
@@ -46,10 +46,10 @@ export function Nav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`rounded-lg px-3 py-1.5 transition ${
+                className={`rounded-full px-3 py-1.5 font-medium transition ${
                   active
-                    ? "bg-ink-800 text-white"
-                    : "text-slate-400 hover:bg-ink-800/60 hover:text-slate-200"
+                    ? "bg-ink-700 text-frost"
+                    : "text-slate-400 hover:bg-ink-800 hover:text-frost"
                 }`}
               >
                 {item.label}

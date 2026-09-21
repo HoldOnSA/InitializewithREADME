@@ -1,28 +1,36 @@
 import type { Config } from "tailwindcss";
 
+// Color and type tokens matched from the `desktop-ui-real` landing page
+// (origin/desktop-ui-real:index.html) - same names as before so every
+// existing `bg-ink-*` / `text-stack` / etc. usage across the app just picks
+// up the new palette without needing every call site touched.
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
         ink: {
-          950: "#07090d",
-          900: "#0c1016",
-          800: "#141a23",
-          700: "#1d2531",
-          600: "#2a3442",
-          500: "#3b485a",
+          950: "#03070c", // --void
+          900: "#060c14", // --void-2
+          800: "#0a121b", // --surface
+          700: "#14212e", // --edge
+          600: "#1e3547", // --edge-lit
+          500: "#44586a", // --slate-dim
         },
         stack: {
-          DEFAULT: "#4ade80",
-          dim: "#166534",
+          DEFAULT: "#35e5ff", // --ice
+          dim: "#1ba9c4", // --ice-dim
         },
-        tax: "#fb7185",
-        pool: "#60a5fa",
-        tier: "#fbbf24",
+        tax: "#ff5d73", // --heat
+        pool: "#1d6fe0", // --deep
+        tier: "#f5c451", // --gold
+        grow: "#3ddc97", // --grow
+        frost: "#dcf3fb", // --frost - primary text
       },
       fontFamily: {
-        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+        display: ["Chakra Petch", "ui-sans-serif", "system-ui", "sans-serif"],
+        body: ["DM Sans", "ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
     },
   },

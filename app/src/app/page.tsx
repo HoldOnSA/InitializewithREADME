@@ -24,7 +24,7 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       <section className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-white">
+        <h1 className="text-3xl font-bold tracking-tight text-frost">
           Holding longer is the whole mechanism
         </h1>
         <p className="max-w-3xl text-sm leading-relaxed text-slate-400">

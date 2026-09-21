@@ -60,7 +60,7 @@ export default function FeedPage() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-white">Live feed</h1>
+          <h1 className="text-3xl font-bold tracking-tight text-frost">Live feed</h1>
           <p className="mt-1 text-sm text-slate-400">
             Newest first, straight off the program&rsquo;s event stream.
           </p>
@@ -89,10 +89,10 @@ export default function FeedPage() {
           <button
             key={option.key}
             onClick={() => setFilter(option.key)}
-            className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
               filter === option.key
                 ? "border-stack bg-stack/10 text-stack"
-                : "border-ink-600 text-slate-400 hover:border-ink-500"
+                : "border-ink-600 text-slate-400 hover:border-stack-dim hover:text-frost"
             }`}
           >
             {option.label}

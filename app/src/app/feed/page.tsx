@@ -13,6 +13,7 @@ const FILTERS: { key: string; label: string; kinds: string[] }[] = [
   { key: "syncs", label: "Weight syncs", kinds: ["WeightSynced"] },
   { key: "donations", label: "Donations", kinds: ["FeeCollected"] },
   { key: "claims", label: "Claims", kinds: ["RewardClaimed"] },
+  { key: "deficits", label: "Deficit alerts", kinds: ["VaultDeficitDetected"] },
 ];
 
 const MAX_ROWS = 400;

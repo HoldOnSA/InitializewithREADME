@@ -29,7 +29,7 @@ from .logic import (
     collect_fee,
     refresh_weight,
     touch_registration,
-    vault_surplus,
+    vault_expected_balance,
 )
 from .state import DepositVault, LoyaltyPool, Registration, TokenConfig
 
@@ -185,18 +185,36 @@ class Market:
     def reconcile(self) -> int:
         """Permissionless: sweep any of the vault's balance that `donate` and
         the registration-marker bookkeeping can't already explain into the
-        pool as fee revenue - see `logic.vault_surplus`. This is what picks
-        up a plain SOL transfer landing in the vault outside of `donate`,
-        which would otherwise sit there forever, invisible to every
-        registration's reward math."""
-        surplus = vault_surplus(
-            self.vault_lamports,
+        pool as fee revenue - see `logic.vault_expected_balance`. This is
+        what picks up a plain SOL transfer landing in the vault outside of
+        `donate`, which would otherwise sit there forever, invisible to
+        every registration's reward math.
+
+        If the vault's real balance ever came in *under* what its own
+        bookkeeping says it should hold - should never happen under correct
+        operation - this emits `VaultDeficitDetected` before raising, the
+        same way `reconcile.rs`'s handler does: a real occurrence needs to
+        be distinguishable from the routine "nothing new arrived yet" case,
+        not silently folded into the same `NothingToReconcile` outcome.
+        """
+        expected = vault_expected_balance(
             DEPOSIT_VAULT_RENT_LAMPORTS,
             self.vault.total_marker_deposits,
             self.vault.total_rent_spent,
             self.pool.total_collected,
             self.pool.total_claimed,
         )
+        if self.vault_lamports < expected:
+            self._emit(
+                "VaultDeficitDetected",
+                mint=self.config.mint,
+                deposit_vault=self.config.deposit_vault,
+                actual_lamports=self.vault_lamports,
+                expected_lamports=expected,
+                deficit=expected - self.vault_lamports,
+            )
+
+        surplus = max(self.vault_lamports - expected, 0)
         if surplus == 0:
             raise StackError("NothingToReconcile")
 

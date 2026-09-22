@@ -149,11 +149,26 @@ class Subscriber:
         elif "account" in value:
             self._handle_account(value, slot)
 
+    # Most events only mean something if the transaction actually succeeded -
+    # `emit!` is a log side effect of a state mutation the runtime rolls back
+    # on failure, so processing one from a failed transaction risks a
+    # phantom line in the feed for something that never actually happened
+    # (e.g. a FeeCollected that looks like a real donation but reverted).
+    # VaultDeficitDetected is the one deliberate exception: `reconcile`
+    # emits it *before* the `require!` that fails the instruction, precisely
+    # so a real vault deficit is observable even though the transaction
+    # reverts - see `reconcile.rs`'s handler. Nothing else currently emits
+    # ahead of a possible failure in the same call, so this list should stay
+    # short; a future instruction doing the same thing needs to be added
+    # here deliberately, not by relaxing this into a blanket allow.
+    _OBSERVABLE_EVEN_ON_FAILURE = {"VaultDeficitDetected"}
+
     def _handle_logs(self, value: Dict[str, Any], slot: int) -> None:
-        if value.get("err"):
-            return  # failed transactions changed nothing
+        failed = bool(value.get("err"))
         signature = value.get("signature", "")
         for event in parse_program_data_lines(value.get("logs", [])):
+            if failed and event["name"] not in self._OBSERVABLE_EVEN_ON_FAILURE:
+                continue
             self.store.apply_event(event["name"], event["data"], slot=slot, signature=signature)
 
     def _handle_account(self, value: Dict[str, Any], slot: int) -> None:

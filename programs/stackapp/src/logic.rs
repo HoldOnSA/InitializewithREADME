@@ -93,12 +93,9 @@ pub fn claim_is_eligible(registration: &Registration, current_slot: u64) -> bool
 // Vault reconciliation
 // ---------------------------------------------------------------------------
 
-/// How much of a `DepositVault`'s real lamport balance is unaccounted for by
-/// anything the program already tracks - i.e. arrived as a plain SOL
-/// transfer that went through neither `donate` nor the registration-marker
-/// flow. Returns 0 if nothing is unaccounted for.
-///
-/// Three things explain a legitimate balance without it being fee revenue:
+/// How much of a `DepositVault`'s real lamport balance the program's own
+/// bookkeeping already explains, without it being fee revenue. Three things
+/// count:
 ///
 /// - `own_rent_floor`: the vault account's own rent-exemption. Never
 ///   spendable, never anyone's reward.
@@ -113,15 +110,10 @@ pub fn claim_is_eligible(registration: &Registration, current_slot: u64) -> bool
 ///   `claim` has already paid back out of it. Already fee revenue, already
 ///   counted - not to be swept a second time.
 ///
-/// Anything above the sum of those three is real, undeclared money sitting
-/// in the vault, and `reconcile` folds it into the pool the same way
-/// `donate` would. Every subtraction saturates rather than erroring: this
-/// function has no side effects and must never be able to brick a
-/// permissionless crank over an arithmetic edge case - a live vault should
-/// never actually reach one, but if it did, saturating to a smaller (or
-/// zero) surplus is the safe direction to be wrong in.
-pub fn vault_surplus(
-    actual_lamports: u64,
+/// Every subtraction saturates rather than erroring: this has no side
+/// effects and must never be able to brick a permissionless crank over an
+/// arithmetic edge case.
+pub fn vault_expected_balance(
     own_rent_floor: u64,
     total_marker_deposits: u64,
     total_rent_spent: u64,
@@ -130,9 +122,35 @@ pub fn vault_surplus(
 ) -> u64 {
     let retained_marker_float = total_marker_deposits.saturating_sub(total_rent_spent);
     let backed_by_pool = total_collected.saturating_sub(total_claimed);
-    let expected = own_rent_floor
+    own_rent_floor
         .saturating_add(retained_marker_float)
-        .saturating_add(backed_by_pool);
+        .saturating_add(backed_by_pool)
+}
+
+/// How much of a `DepositVault`'s real lamport balance is unaccounted for by
+/// anything the program already tracks - i.e. arrived as a plain SOL
+/// transfer that went through neither `donate` nor the registration-marker
+/// flow. Returns 0 if nothing is unaccounted for (including, deliberately,
+/// when `actual_lamports` falls *under* `vault_expected_balance` - that's a
+/// deficit, not a surplus, and callers that need to tell the two apart
+/// should compare against `vault_expected_balance` directly rather than
+/// relying on this saturating to zero either way; `reconcile` does exactly
+/// that to emit `VaultDeficitDetected`).
+pub fn vault_surplus(
+    actual_lamports: u64,
+    own_rent_floor: u64,
+    total_marker_deposits: u64,
+    total_rent_spent: u64,
+    total_collected: u64,
+    total_claimed: u64,
+) -> u64 {
+    let expected = vault_expected_balance(
+        own_rent_floor,
+        total_marker_deposits,
+        total_rent_spent,
+        total_collected,
+        total_claimed,
+    );
     actual_lamports.saturating_sub(expected)
 }
 
@@ -422,6 +440,24 @@ mod tests {
             // saturate rather than underflow if it somehow ever did.
             let actual = 100; // far below RENT_FLOOR + one marker's float
             assert_eq!(vault_surplus(actual, RENT_FLOOR, 2_500_000, 0, 0, 0), 0);
+        }
+
+        #[test]
+        fn a_deficit_is_detectable_via_vault_expected_balance_directly() {
+            // `vault_surplus` alone can't tell a genuine deficit apart from
+            // the routine "nothing new arrived" case - both saturate to the
+            // same 0. This is exactly the condition `reconcile`'s handler
+            // checks (`actual_lamports < expected`) to decide whether to
+            // emit `VaultDeficitDetected` before failing - same inputs as
+            // the test above, confirming the comparison a caller needs to
+            // make this distinguishable actually holds.
+            let actual = 100u64;
+            let expected = vault_expected_balance(RENT_FLOOR, 2_500_000, 0, 0, 0);
+            assert!(
+                actual < expected,
+                "a real deficit must be detectable via vault_expected_balance, \
+                 even though vault_surplus alone can't distinguish it from a no-op"
+            );
         }
 
         #[test]

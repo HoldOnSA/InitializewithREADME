@@ -132,12 +132,22 @@ REWARD_CLAIMED: Layout = [
     ("timestamp", "i64"),
 ]
 
+VAULT_DEFICIT_DETECTED: Layout = [
+    ("mint", "pubkey"),
+    ("deposit_vault", "pubkey"),
+    ("actual_lamports", "u64"),
+    ("expected_lamports", "u64"),
+    ("deficit", "u64"),
+    ("timestamp", "i64"),
+]
+
 EVENT_LAYOUTS: Dict[str, Layout] = {
     "MintRegistered": MINT_REGISTERED,
     "WalletRegistered": WALLET_REGISTERED,
     "WeightSynced": WEIGHT_SYNCED,
     "FeeCollected": FEE_COLLECTED,
     "RewardClaimed": REWARD_CLAIMED,
+    "VaultDeficitDetected": VAULT_DEFICIT_DETECTED,
 }
 
 EVENT_BY_DISCRIMINATOR: Dict[bytes, str] = {

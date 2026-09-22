@@ -54,6 +54,18 @@ def render_event_html(event: Dict[str, Any], decimals: int = 0) -> Markup:
             f'<b class="mono" style="color:var(--pool)">{escape(sol(d.get("amount")))}</b>'
         )
 
+    elif name == "VaultDeficitDetected":
+        # Should never happen under correct operation - see reconcile.rs.
+        # Always shown, even though the reconcile() call that emitted it
+        # always fails - that's the whole point of this event.
+        html = (
+            f'<span style="color:var(--tax)"><strong>Vault deficit detected</strong> - real '
+            f'balance {escape(sol(d.get("actual_lamports")))} is '
+            f'{escape(sol(d.get("deficit")))} under what the vault\'s own bookkeeping expects '
+            f'({escape(sol(d.get("expected_lamports")))}). This should never happen - '
+            f'investigate.</span>'
+        )
+
     else:
         html = f'<span class="dim">{escape(name)}</span>'
 

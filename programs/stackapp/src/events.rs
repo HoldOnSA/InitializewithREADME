@@ -55,3 +55,20 @@ pub struct RewardClaimed {
     pub lifetime_claimed: u64,
     pub timestamp: i64,
 }
+
+/// Emitted by `reconcile` when the vault's real balance comes in *under*
+/// what its own bookkeeping (rent floor + unspent marker float + pool-backed
+/// balance) says it should hold - should never happen under correct
+/// operation. `reconcile` still fails its `require!` after this (there is
+/// nothing to sweep either way), so this only ever reaches an indexer that
+/// doesn't discard logs from a failed transaction - see
+/// `subscriber.py::_handle_logs`.
+#[event]
+pub struct VaultDeficitDetected {
+    pub mint: Pubkey,
+    pub deposit_vault: Pubkey,
+    pub actual_lamports: u64,
+    pub expected_lamports: u64,
+    pub deficit: u64,
+    pub timestamp: i64,
+}

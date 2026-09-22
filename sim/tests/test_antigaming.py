@@ -249,6 +249,40 @@ class TestVaultReconciliation(unittest.TestCase):
         with self.assertRaises(StackError):
             m.reconcile()
 
+    def test_the_routine_no_op_case_emits_no_deficit_event(self):
+        """A `NothingToReconcile` from "nothing new arrived yet" must not be
+        confused with a genuine deficit - no alert for the common case."""
+        m = fresh()
+        with self.assertRaises(StackError):
+            m.reconcile()
+        self.assertFalse(any(e.kind == "VaultDeficitDetected" for e in m.events))
+
+    def test_a_genuine_deficit_emits_a_distinguishable_event_before_raising(self):
+        """Mirrors `reconcile.rs`'s handler: a vault balance coming in under
+        what the bookkeeping says it should hold must be distinguishable
+        from the routine no-op case, not silently folded into the same
+        NothingToReconcile outcome - see the Rust review that caught this."""
+        m = fresh()
+        m.write_registration("alice")  # real marker/rent float now tracked
+        # Should never happen under correct operation, but simulate an
+        # external drain / accounting bug: the real balance falls under what
+        # write_registration's own bookkeeping says it must hold.
+        m.vault_lamports -= REGISTRATION_MARKER_LAMPORTS
+
+        with self.assertRaises(StackError):
+            m.reconcile()
+
+        deficits = [e for e in m.events if e.kind == "VaultDeficitDetected"]
+        self.assertEqual(len(deficits), 1)
+        payload = deficits[0].payload
+        self.assertEqual(payload["mint"], m.config.mint)
+        self.assertGreater(payload["deficit"], 0)
+        self.assertEqual(
+            payload["expected_lamports"] - payload["actual_lamports"], payload["deficit"]
+        )
+        # And the pool must be untouched - a deficit sweeps nothing.
+        self.assertEqual(m.pool.total_collected, 0)
+
     def test_registration_markers_alone_are_not_swept_as_revenue(self):
         m = fresh()
         for i in range(5):

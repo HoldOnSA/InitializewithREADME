@@ -2,8 +2,8 @@ use anchor_lang::prelude::*;
 
 use crate::constants::*;
 use crate::errors::StackError;
-use crate::events::FeeCollected;
-use crate::logic::{collect_fee, vault_surplus};
+use crate::events::{FeeCollected, VaultDeficitDetected};
+use crate::logic::{collect_fee, vault_expected_balance};
 use crate::state::*;
 
 #[derive(Accounts)]
@@ -54,14 +54,35 @@ pub fn handler(ctx: Context<Reconcile>) -> Result<()> {
     let actual_lamports = vault_info.lamports();
     let vault = &ctx.accounts.deposit_vault;
 
-    let surplus = vault_surplus(
-        actual_lamports,
+    let expected = vault_expected_balance(
         own_rent_floor,
         vault.total_marker_deposits,
         vault.total_rent_spent,
         ctx.accounts.loyalty_pool.total_collected,
         ctx.accounts.loyalty_pool.total_claimed,
     );
+
+    // Should never happen under correct operation - the vault's own
+    // bookkeeping says it should hold at least this much. `vault_surplus`
+    // would just saturate this to the same "nothing to sweep" outcome as the
+    // completely routine case below, which is exactly why that's not enough
+    // on its own: a real occurrence here needs to be distinguishable from
+    // ordinary "nothing new arrived yet" calls, not silently folded into the
+    // same code path. Emitted before the `require!` below fails the
+    // instruction, so it only reaches an indexer that doesn't discard logs
+    // from a failed transaction - see `subscriber.py::_handle_logs`.
+    if actual_lamports < expected {
+        emit!(VaultDeficitDetected {
+            mint: mint_key,
+            deposit_vault: ctx.accounts.deposit_vault.key(),
+            actual_lamports,
+            expected_lamports: expected,
+            deficit: expected - actual_lamports,
+            timestamp: now,
+        });
+    }
+
+    let surplus = actual_lamports.saturating_sub(expected);
     require!(surplus > 0, StackError::NothingToReconcile);
 
     let pool = &mut ctx.accounts.loyalty_pool;

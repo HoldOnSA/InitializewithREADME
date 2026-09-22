@@ -43,6 +43,7 @@ FEED_FILTERS = [
     {"label": "Weight syncs", "kinds": ["WeightSynced"]},
     {"label": "Donations", "kinds": ["FeeCollected"]},
     {"label": "Claims", "kinds": ["RewardClaimed"]},
+    {"label": "Deficit alerts", "kinds": ["VaultDeficitDetected"]},
 ]
 
 TENURE_TIERS = list(zip((0, *TENURE_TIER_SECONDS), TENURE_TIER_MULTIPLIER_BPS))

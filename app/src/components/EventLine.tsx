@@ -48,6 +48,18 @@ export function EventLine({ event }: { event: FeedEvent }) {
         </span>
       );
 
+    case "VaultDeficitDetected":
+      // Should never happen under correct operation - see reconcile.rs.
+      // Always shown, even though the reconcile() call that emitted it
+      // always fails - that's the whole point of this event.
+      return (
+        <span className="text-tax">
+          <strong>Vault deficit detected</strong> - real balance {sol(d.actual_lamports)} is{" "}
+          {sol(d.deficit)} under what the vault&rsquo;s own bookkeeping expects (
+          {sol(d.expected_lamports)}). This should never happen - investigate.
+        </span>
+      );
+
     default:
       return <span className="text-slate-500">{event.name}</span>;
   }

@@ -77,20 +77,16 @@ def claim_is_eligible(registration: Registration, current_slot: int) -> bool:
     return current_slot >= registration.last_sync_slot + MIN_CLAIM_DELAY_SLOTS
 
 
-def vault_surplus(
-    actual_lamports: int,
+def vault_expected_balance(
     own_rent_floor: int,
     total_marker_deposits: int,
     total_rent_spent: int,
     total_collected: int,
     total_claimed: int,
 ) -> int:
-    """How much of a DepositVault's real lamport balance is unaccounted for by
-    anything the program already tracks - i.e. arrived as a plain SOL transfer
-    that went through neither `donate` nor the registration-marker flow.
-    Returns 0 if nothing is unaccounted for.
-
-    Three things explain a legitimate balance without it being fee revenue:
+    """How much of a DepositVault's real lamport balance the program's own
+    bookkeeping already explains, without it being fee revenue. Three things
+    count:
 
     - `own_rent_floor`: the vault account's own rent-exemption. Never
       spendable, never anyone's reward.
@@ -105,14 +101,33 @@ def vault_surplus(
       `claim` has already paid back out of it. Already fee revenue, already
       counted - not to be swept a second time.
 
-    Anything above the sum of those three is real, undeclared money sitting in
-    the vault, and `Market.reconcile()` folds it into the pool the same way
-    `donate` would. Every subtraction saturates (clamps to 0) rather than
-    going negative, mirroring Rust's `saturating_sub`: this function has no
-    side effects and must never be able to brick a permissionless crank over
-    an arithmetic edge case.
+    Every subtraction clamps to 0 rather than going negative, mirroring
+    Rust's `saturating_sub`: this has no side effects and must never be able
+    to brick a permissionless crank over an arithmetic edge case.
     """
     retained_marker_float = max(total_marker_deposits - total_rent_spent, 0)
     backed_by_pool = max(total_collected - total_claimed, 0)
-    expected = own_rent_floor + retained_marker_float + backed_by_pool
+    return own_rent_floor + retained_marker_float + backed_by_pool
+
+
+def vault_surplus(
+    actual_lamports: int,
+    own_rent_floor: int,
+    total_marker_deposits: int,
+    total_rent_spent: int,
+    total_collected: int,
+    total_claimed: int,
+) -> int:
+    """How much of a DepositVault's real lamport balance is unaccounted for by
+    anything the program already tracks - i.e. arrived as a plain SOL transfer
+    that went through neither `donate` nor the registration-marker flow.
+    Returns 0 if nothing is unaccounted for (including, deliberately, when
+    `actual_lamports` falls *under* `vault_expected_balance` - that's a
+    deficit, not a surplus; callers that need to tell the two apart should
+    compare against `vault_expected_balance` directly, the way
+    `Market.reconcile()` does to raise a distinguishable signal).
+    """
+    expected = vault_expected_balance(
+        own_rent_floor, total_marker_deposits, total_rent_spent, total_collected, total_claimed
+    )
     return max(actual_lamports - expected, 0)

@@ -89,6 +89,53 @@ pub fn claim_is_eligible(registration: &Registration, current_slot: u64) -> bool
     current_slot >= registration.last_sync_slot.saturating_add(MIN_CLAIM_DELAY_SLOTS)
 }
 
+// ---------------------------------------------------------------------------
+// Vault reconciliation
+// ---------------------------------------------------------------------------
+
+/// How much of a `DepositVault`'s real lamport balance is unaccounted for by
+/// anything the program already tracks - i.e. arrived as a plain SOL
+/// transfer that went through neither `donate` nor the registration-marker
+/// flow. Returns 0 if nothing is unaccounted for.
+///
+/// Three things explain a legitimate balance without it being fee revenue:
+///
+/// - `own_rent_floor`: the vault account's own rent-exemption. Never
+///   spendable, never anyone's reward.
+/// - `total_marker_deposits - total_rent_spent`: registration-marker money
+///   received but not yet consumed by the rent `write_registration` pays out
+///   of the vault to create each `Registration` PDA. `REGISTRATION_MARKER_LAMPORTS`
+///   is deliberately more than one PDA's rent (see its doc comment), so this
+///   is normally positive and grows by a fixed amount per registration - the
+///   non-refundable "registration cost" float, not a reward.
+/// - `total_collected - total_claimed`: real lamports `donate` has already
+///   moved into the vault and folded into the accumulator, minus whatever
+///   `claim` has already paid back out of it. Already fee revenue, already
+///   counted - not to be swept a second time.
+///
+/// Anything above the sum of those three is real, undeclared money sitting
+/// in the vault, and `reconcile` folds it into the pool the same way
+/// `donate` would. Every subtraction saturates rather than erroring: this
+/// function has no side effects and must never be able to brick a
+/// permissionless crank over an arithmetic edge case - a live vault should
+/// never actually reach one, but if it did, saturating to a smaller (or
+/// zero) surplus is the safe direction to be wrong in.
+pub fn vault_surplus(
+    actual_lamports: u64,
+    own_rent_floor: u64,
+    total_marker_deposits: u64,
+    total_rent_spent: u64,
+    total_collected: u64,
+    total_claimed: u64,
+) -> u64 {
+    let retained_marker_float = total_marker_deposits.saturating_sub(total_rent_spent);
+    let backed_by_pool = total_collected.saturating_sub(total_claimed);
+    let expected = own_rent_floor
+        .saturating_add(retained_marker_float)
+        .saturating_add(backed_by_pool);
+    actual_lamports.saturating_sub(expected)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +353,93 @@ mod tests {
             claimed_total + still_pending,
             pool.total_collected
         );
+    }
+
+    mod vault_surplus_tests {
+        use super::*;
+
+        const RENT_FLOOR: u64 = 890_880; // a real 0-byte-account rent exemption, for realism
+
+        #[test]
+        fn an_exactly_explained_balance_has_no_surplus() {
+            // rent floor + one unspent marker float + pool-backed balance,
+            // and nothing more.
+            let actual = RENT_FLOOR + 711_280 + 4_000;
+            assert_eq!(vault_surplus(actual, RENT_FLOOR, 2_500_000, 1_788_720, 10_000, 6_000), 0);
+        }
+
+        #[test]
+        fn a_plain_transfer_beyond_everything_explained_is_the_surplus() {
+            let explained = RENT_FLOOR + 711_280 + 4_000;
+            let actual = explained + 50_000; // an untracked SOL transfer landed
+            assert_eq!(
+                vault_surplus(actual, RENT_FLOOR, 2_500_000, 1_788_720, 10_000, 6_000),
+                50_000
+            );
+        }
+
+        #[test]
+        fn unspent_marker_float_is_never_swept_as_revenue() {
+            // One registration's marker just landed conceptually - no rent
+            // spent against it yet, so the whole marker is retained float,
+            // not a surplus, even though nothing else backs the balance.
+            let actual = RENT_FLOOR + 2_500_000;
+            assert_eq!(vault_surplus(actual, RENT_FLOOR, 2_500_000, 0, 0, 0), 0);
+        }
+
+        #[test]
+        fn unclaimed_donated_fees_are_never_swept_twice() {
+            // donate() already moved this money in AND already told the pool
+            // about it - reconcile must not double-count it.
+            let actual = RENT_FLOOR + 100_000;
+            assert_eq!(vault_surplus(actual, RENT_FLOOR, 0, 0, 100_000, 0), 0);
+        }
+
+        #[test]
+        fn the_vaults_own_rent_floor_is_never_mistaken_for_revenue() {
+            assert_eq!(vault_surplus(RENT_FLOOR, RENT_FLOOR, 0, 0, 0, 0), 0);
+        }
+
+        #[test]
+        fn a_balance_below_what_is_explained_saturates_to_zero_rather_than_panicking() {
+            // Should never happen under correct operation, but a permissionless
+            // crank must never be able to panic over it.
+            let actual = RENT_FLOOR; // less than what total_collected alone implies
+            assert_eq!(vault_surplus(actual, RENT_FLOOR, 0, 0, 100_000, 0), 0);
+        }
+
+        #[test]
+        fn a_deficit_from_markers_and_rent_alone_saturates_to_zero() {
+            // Isolates the marker/rent term specifically (total_collected and
+            // total_claimed are both zero here, so the pool-backed term
+            // contributes nothing): the vault's real balance coming in under
+            // what own_rent_floor + retained_marker_float alone implies it
+            // should hold. Should never happen - write_registration always
+            // credits the marker and debits the rent out of the same vault
+            // balance in the same instruction, so the two can never get
+            // ahead of the vault's real lamports - but `reconcile` runs
+            // against whatever the actual on-chain balance is, and this must
+            // saturate rather than underflow if it somehow ever did.
+            let actual = 100; // far below RENT_FLOOR + one marker's float
+            assert_eq!(vault_surplus(actual, RENT_FLOOR, 2_500_000, 0, 0, 0), 0);
+        }
+
+        #[test]
+        fn desynced_counters_saturate_instead_of_underflowing() {
+            // total_rent_spent > total_marker_deposits should never happen
+            // (write_registration only ever increments them together), but
+            // the function must not panic if it somehow did.
+            assert_eq!(vault_surplus(RENT_FLOOR, RENT_FLOOR, 100, 200, 0, 0), 0);
+            // Same for total_claimed > total_collected.
+            assert_eq!(vault_surplus(RENT_FLOOR, RENT_FLOOR, 0, 0, 100, 200), 0);
+        }
+
+        #[test]
+        fn many_registrations_worth_of_float_still_never_counts_as_revenue() {
+            let markers = 2_500_000u64 * 10;
+            let rent_spent = 1_788_720u64 * 10;
+            let actual = RENT_FLOOR + (markers - rent_spent);
+            assert_eq!(vault_surplus(actual, RENT_FLOOR, markers, rent_spent, 0, 0), 0);
+        }
     }
 }

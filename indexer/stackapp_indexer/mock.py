@@ -153,7 +153,12 @@ class MockDriver:
 
         self.store.apply_account(
             "DepositVault",
-            {"mint": config.mint, "bump": 254},
+            {
+                "mint": config.mint,
+                "total_marker_deposits": market.vault.total_marker_deposits,
+                "total_rent_spent": market.vault.total_rent_spent,
+                "bump": 254,
+            },
             config.deposit_vault,
             market.slot,
             lamports=market.vault_lamports,
@@ -226,12 +231,20 @@ class MockDriver:
                         wallet, max(0, market.balance_of(wallet) + self.rng.randint(-5, 10) * 10**8)
                     )
                     market.sync(wallet)
-            elif action < 0.85:
+            elif action < 0.80:
                 if wallet in market.registrations:
                     with contextlib.suppress(StackError):
                         market.claim(wallet)
-            else:
+            elif action < 0.92:
                 market.donate(self.address("creator"), self.rng.randint(1, 10) * 10**7)
+            elif action < 0.97:
+                # A plain SOL transfer landing outside `donate` entirely - the
+                # same shape as a marker, but from nobody in particular and
+                # for no registration. Left alone until something reconciles it.
+                market.vault_lamports += self.rng.randint(1, 5) * 10**6
+            else:
+                with contextlib.suppress(StackError):
+                    market.reconcile()
         except StackError as exc:
             log.debug("mock action rejected: %s", exc)
 

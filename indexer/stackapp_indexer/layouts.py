@@ -51,6 +51,8 @@ TOKEN_CONFIG: Layout = [
 
 DEPOSIT_VAULT: Layout = [
     ("mint", "pubkey"),
+    ("total_marker_deposits", "u64"),
+    ("total_rent_spent", "u64"),
     ("bump", "u8"),
 ]
 

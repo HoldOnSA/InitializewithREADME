@@ -173,6 +173,7 @@ def all_instructions():
         "sync": txbuild.sync(PROGRAM_ID, ALICE, BOB, MINT, TOKEN_PROGRAM_ID),
         "claim": txbuild.claim(PROGRAM_ID, ALICE, MINT, TOKEN_PROGRAM_ID),
         "donate": txbuild.donate(PROGRAM_ID, ALICE, MINT, 1_000),
+        "reconcile": txbuild.reconcile(PROGRAM_ID, ALICE, MINT),
     }
 
 
@@ -284,6 +285,7 @@ class TestRustParity(unittest.TestCase):
             "sync": txbuild.sync(PROGRAM_ID, ALICE, BOB, MINT, TOKEN_PROGRAM_ID),
             "claim": txbuild.claim(PROGRAM_ID, ALICE, MINT, TOKEN_PROGRAM_ID),
             "donate": txbuild.donate(PROGRAM_ID, ALICE, MINT, 1),
+            "reconcile": txbuild.reconcile(PROGRAM_ID, ALICE, MINT),
         }
 
         for name, instruction in cases.items():

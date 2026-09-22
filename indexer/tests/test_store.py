@@ -136,5 +136,44 @@ class TestLiveStepping(unittest.TestCase):
         self.assertLessEqual(len(store.feed), MAX_FEED_EVENTS)
 
 
+class TestVaultReconciliation(unittest.TestCase):
+    def setUp(self):
+        self.store, self.driver = bootstrapped()
+        self.market = self.driver.markets[0]
+        self.driver.sync(self.market)
+
+    def test_deposit_vault_fields_decode_into_the_token_view(self):
+        mint = self.market.config.mint
+        self.market.write_registration(self.driver.address("fresh-wallet"))
+        self.driver.sync(self.market)
+
+        view = self.store.token_view(mint)
+        self.assertEqual(view["totalMarkerDeposits"], self.market.vault.total_marker_deposits)
+        self.assertEqual(view["totalRentSpent"], self.market.vault.total_rent_spent)
+        self.assertGreater(view["totalMarkerDeposits"], 0)
+
+    def test_a_raw_sol_transfer_outside_donate_shows_up_as_a_pending_surplus(self):
+        """The case this whole feature exists for: money that never went
+        through `donateIx` at all."""
+        mint = self.market.config.mint
+        before = self.store.token_view(mint)["pendingReconcileSurplus"]
+        self.assertEqual(before, 0)
+
+        self.market.vault_lamports += 60_000
+        self.driver.sync(self.market)
+
+        after = self.store.token_view(mint)["pendingReconcileSurplus"]
+        self.assertEqual(after, 60_000)
+
+        # Reconciling sweeps it into the pool, so the view agrees afterward.
+        collected_before = self.store.token_view(mint)["pool"]["totalCollected"]
+        self.market.reconcile()
+        self.driver.sync(self.market)
+
+        view = self.store.token_view(mint)
+        self.assertEqual(view["pendingReconcileSurplus"], 0)
+        self.assertEqual(view["pool"]["totalCollected"], collected_before + 60_000)
+
+
 if __name__ == "__main__":
     unittest.main()

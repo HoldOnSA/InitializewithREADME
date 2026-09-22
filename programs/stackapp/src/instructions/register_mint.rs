@@ -85,6 +85,8 @@ pub fn handler(ctx: Context<RegisterMint>, creator: Pubkey) -> Result<()> {
 
     let vault = &mut ctx.accounts.deposit_vault;
     vault.mint = mint_key;
+    vault.total_marker_deposits = 0;
+    vault.total_rent_spent = 0;
     vault.bump = ctx.bumps.deposit_vault;
 
     emit!(MintRegistered {

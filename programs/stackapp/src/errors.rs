@@ -16,4 +16,6 @@ pub enum StackError {
     InvalidTokenAccount,
     #[msg("Donation amount must be greater than zero")]
     ZeroDonation,
+    #[msg("The deposit vault's balance is already fully accounted for - nothing to sweep")]
+    NothingToReconcile,
 }

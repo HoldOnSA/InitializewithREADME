@@ -17,7 +17,12 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, Iterable, List, Optional, Set, Tuple
 
-from stackapp_sim.constants import MIN_CLAIM_DELAY_SLOTS, REGISTRATION_MARKER_LAMPORTS
+from stackapp_sim.constants import (
+    DEPOSIT_VAULT_RENT_LAMPORTS,
+    MIN_CLAIM_DELAY_SLOTS,
+    REGISTRATION_MARKER_LAMPORTS,
+)
+from stackapp_sim.logic import vault_surplus
 from stackapp_sim.math import distribute, pending, tenure_multiplier_bps
 
 MAX_FEED_EVENTS = 5_000
@@ -72,6 +77,10 @@ class Store:
     configs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     pools: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     vault_lamports: Dict[str, int] = field(default_factory=dict)  # by mint
+    # Decoded DepositVault records (total_marker_deposits, total_rent_spent),
+    # keyed by mint - separate from vault_lamports, which is the vault's real
+    # balance read off the account, not anything decoded from its data.
+    vaults: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     # keyed by (mint, owner)
     registrations: Dict[Tuple[str, str], Dict[str, Any]] = field(default_factory=dict)
 
@@ -104,6 +113,7 @@ class Store:
             self.pools[data["mint"]] = record
         elif name == "DepositVault":
             self.vault_lamports[data["mint"]] = lamports
+            self.vaults[data["mint"]] = record
         elif name == "Registration":
             key = (data["mint"], data["owner"])
             self.registrations[key] = record
@@ -181,6 +191,8 @@ class Store:
         if config is None:
             return None
         now = self.now()
+        vault = self.vaults.get(mint, {})
+        pool = self.pools.get(mint, {})
 
         return {
             "mint": mint,
@@ -190,6 +202,19 @@ class Store:
             "depositVault": config["deposit_vault"],
             "vaultLamports": self.vault_lamports.get(mint, 0),
             "registrationMarkerLamports": REGISTRATION_MARKER_LAMPORTS,
+            "totalMarkerDeposits": vault.get("total_marker_deposits", 0),
+            "totalRentSpent": vault.get("total_rent_spent", 0),
+            # Money sitting in the vault that neither `donate` nor the
+            # marker/rent bookkeeping explains - e.g. a plain SOL transfer -
+            # and that `reconcile` would sweep into the pool right now.
+            "pendingReconcileSurplus": vault_surplus(
+                self.vault_lamports.get(mint, 0),
+                DEPOSIT_VAULT_RENT_LAMPORTS,
+                vault.get("total_marker_deposits", 0),
+                vault.get("total_rent_spent", 0),
+                pool.get("total_collected", 0),
+                pool.get("total_claimed", 0),
+            ),
             "pool": self.pool_view(mint),
             "registrationCount": sum(1 for (m, _o) in self.registrations if m == mint),
             "pendingRegistrationCount": sum(

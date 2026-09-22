@@ -7,7 +7,14 @@ Mirrors the `#[cfg(test)]` module in `programs/stackapp/src/logic.rs`.
 import unittest
 
 from stackapp_sim import Market, StackError
-from stackapp_sim.constants import MIN_CLAIM_DELAY_SLOTS, TENURE_TIER_SECONDS
+from stackapp_sim.constants import (
+    DEPOSIT_VAULT_RENT_LAMPORTS,
+    MIN_CLAIM_DELAY_SLOTS,
+    REGISTRATION_MARKER_LAMPORTS,
+    REGISTRATION_RENT_LAMPORTS,
+    TENURE_TIER_SECONDS,
+)
+from stackapp_sim.logic import vault_surplus
 
 
 def fresh(now=0, slot=0):
@@ -179,6 +186,137 @@ class TestLongRunInvariants(unittest.TestCase):
             f"{m.pool.total_collected}",
         )
         m.assert_invariants("random ops")
+
+
+class TestVaultSurplusMath(unittest.TestCase):
+    """Mirrors `vault_surplus_tests` in `programs/stackapp/src/logic.rs`."""
+
+    RENT_FLOOR = 890_880  # a real 0-byte-account rent exemption, for realism
+
+    def test_an_exactly_explained_balance_has_no_surplus(self):
+        actual = self.RENT_FLOOR + 711_280 + 4_000
+        self.assertEqual(
+            vault_surplus(actual, self.RENT_FLOOR, 2_500_000, 1_788_720, 10_000, 6_000), 0
+        )
+
+    def test_a_plain_transfer_beyond_everything_explained_is_the_surplus(self):
+        explained = self.RENT_FLOOR + 711_280 + 4_000
+        actual = explained + 50_000
+        self.assertEqual(
+            vault_surplus(actual, self.RENT_FLOOR, 2_500_000, 1_788_720, 10_000, 6_000), 50_000
+        )
+
+    def test_unspent_marker_float_is_never_swept_as_revenue(self):
+        actual = self.RENT_FLOOR + 2_500_000
+        self.assertEqual(vault_surplus(actual, self.RENT_FLOOR, 2_500_000, 0, 0, 0), 0)
+
+    def test_unclaimed_donated_fees_are_never_swept_twice(self):
+        actual = self.RENT_FLOOR + 100_000
+        self.assertEqual(vault_surplus(actual, self.RENT_FLOOR, 0, 0, 100_000, 0), 0)
+
+    def test_the_vaults_own_rent_floor_is_never_mistaken_for_revenue(self):
+        self.assertEqual(vault_surplus(self.RENT_FLOOR, self.RENT_FLOOR, 0, 0, 0, 0), 0)
+
+    def test_a_balance_below_what_is_explained_saturates_to_zero(self):
+        self.assertEqual(vault_surplus(self.RENT_FLOOR, self.RENT_FLOOR, 0, 0, 100_000, 0), 0)
+
+    def test_a_deficit_from_markers_and_rent_alone_saturates_to_zero(self):
+        # Isolates the marker/rent term specifically (total_collected and
+        # total_claimed are both zero, so the pool-backed term contributes
+        # nothing): the vault's real balance coming in under what
+        # own_rent_floor + retained_marker_float alone implies it should
+        # hold. Should never happen in correct operation, but must saturate
+        # rather than go negative if it somehow did.
+        actual = 100  # far below RENT_FLOOR + one marker's float
+        self.assertEqual(vault_surplus(actual, self.RENT_FLOOR, 2_500_000, 0, 0, 0), 0)
+
+    def test_desynced_counters_saturate_instead_of_going_negative(self):
+        self.assertEqual(vault_surplus(self.RENT_FLOOR, self.RENT_FLOOR, 100, 200, 0, 0), 0)
+        self.assertEqual(vault_surplus(self.RENT_FLOOR, self.RENT_FLOOR, 0, 0, 100, 200), 0)
+
+    def test_many_registrations_worth_of_float_still_never_counts_as_revenue(self):
+        markers = 2_500_000 * 10
+        rent_spent = 1_788_720 * 10
+        actual = self.RENT_FLOOR + (markers - rent_spent)
+        self.assertEqual(vault_surplus(actual, self.RENT_FLOOR, markers, rent_spent, 0, 0), 0)
+
+
+class TestVaultReconciliation(unittest.TestCase):
+    """End to end through `Market.reconcile()`."""
+
+    def test_a_freshly_registered_token_has_nothing_to_reconcile(self):
+        m = fresh()
+        with self.assertRaises(StackError):
+            m.reconcile()
+
+    def test_registration_markers_alone_are_not_swept_as_revenue(self):
+        m = fresh()
+        for i in range(5):
+            m.write_registration(f"w{i}")
+        # Five markers landed and five rents were spent - normal registration
+        # float, not revenue.
+        with self.assertRaises(StackError):
+            m.reconcile()
+
+    def test_donated_fees_are_not_double_counted_by_reconcile(self):
+        m = fresh()
+        m.write_registration("alice")
+        m.set_balance("alice", 1_000)
+        m.sync("alice")
+        m.donate("creator", 50_000)
+        # donate() already told the pool about this money - nothing left over.
+        with self.assertRaises(StackError):
+            m.reconcile()
+
+    def test_a_raw_sol_transfer_outside_donate_is_detected_and_swept(self):
+        """The headline case: money that never went through `donate` at all."""
+        m = fresh()
+        m.write_registration("alice")
+        m.set_balance("alice", 1_000)
+        m.sync("alice")
+
+        before = m.pool.total_collected
+        # Nothing in StackApp models an arbitrary external wallet sending SOL
+        # straight to the vault address - it's just a plain System transfer,
+        # exactly like a registration marker, so we inject it the same way
+        # `set_balance` injects an external pump.fun balance change.
+        m.vault_lamports += 75_000
+
+        surplus = m.reconcile()
+        self.assertEqual(surplus, 75_000)
+        self.assertEqual(m.pool.total_collected, before + 75_000)
+
+        # It must not be swept a second time.
+        with self.assertRaises(StackError):
+            m.reconcile()
+
+    def test_a_swept_raw_transfer_is_claimable_like_any_other_fee(self):
+        m = fresh()
+        m.write_registration("alice")
+        m.set_balance("alice", 1_000)
+        m.sync("alice")
+
+        m.vault_lamports += 40_000
+        m.reconcile()
+
+        m.advance(slots=MIN_CLAIM_DELAY_SLOTS)
+        payout = m.claim("alice")
+        self.assertGreater(payout, 0)
+        m.assert_invariants("reconciled surplus is claimable")
+
+    def test_vault_lamports_starts_at_its_own_rent_exemption(self):
+        m = fresh()
+        self.assertEqual(m.vault_lamports, DEPOSIT_VAULT_RENT_LAMPORTS)
+
+    def test_write_registration_moves_real_lamports(self):
+        m = fresh()
+        before = m.vault_lamports
+        m.write_registration("alice")
+        self.assertEqual(
+            m.vault_lamports, before + REGISTRATION_MARKER_LAMPORTS - REGISTRATION_RENT_LAMPORTS
+        )
+        self.assertEqual(m.vault.total_marker_deposits, REGISTRATION_MARKER_LAMPORTS)
+        self.assertEqual(m.vault.total_rent_spent, REGISTRATION_RENT_LAMPORTS)
 
 
 if __name__ == "__main__":

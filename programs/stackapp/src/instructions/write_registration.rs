@@ -3,6 +3,7 @@ use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::solana_program::system_instruction;
 
 use crate::constants::*;
+use crate::errors::StackError;
 use crate::events::WalletRegistered;
 use crate::state::*;
 
@@ -97,6 +98,21 @@ pub fn handler(ctx: Context<WriteRegistration>) -> Result<()> {
         ],
         &[deposit_seeds, registration_seeds],
     )?;
+
+    // A marker transfer is invisible on chain - this call running at all is
+    // the only evidence one happened (see the honor-system note above). This
+    // is what lets `reconcile` tell "marker money not yet consumed by rent"
+    // apart from real fee revenue, without needing to observe the transfer
+    // itself.
+    let vault = &mut ctx.accounts.deposit_vault;
+    vault.total_marker_deposits = vault
+        .total_marker_deposits
+        .checked_add(REGISTRATION_MARKER_LAMPORTS)
+        .ok_or(StackError::MathOverflow)?;
+    vault.total_rent_spent = vault
+        .total_rent_spent
+        .checked_add(rent)
+        .ok_or(StackError::MathOverflow)?;
 
     let registration = Registration {
         owner: owner_key,

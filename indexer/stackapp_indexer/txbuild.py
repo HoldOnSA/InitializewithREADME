@@ -311,6 +311,17 @@ def donate(program_id: str, donor: str, mint: str, amount: int) -> Instruction:
     )
 
 
+def reconcile(program_id: str, cranker: str, mint: str) -> Instruction:
+    pool, _ = loyalty_pool_pda(mint, program_id)
+    vault, _ = deposit_vault_pda(mint, program_id)
+
+    return _ix(
+        program_id,
+        [signer(cranker, False), ro(mint), rw(pool), rw(vault)],
+        "reconcile",
+    )
+
+
 BUILDERS = {
     "initialize_config": initialize_config,
     "update_authority": update_authority,
@@ -319,6 +330,7 @@ BUILDERS = {
     "sync": sync,
     "claim": claim,
     "donate": donate,
+    "reconcile": reconcile,
 }
 
 

@@ -78,6 +78,7 @@ function explain(cause: unknown): string {
     [/AccountAlreadyInitialized/, "This wallet is already registered for this token."],
     [/has_one|ConstraintHasOne/, "Wrong signer - this action needs the program's current authority."],
     [/AccountNotInitialized/, "Not registered yet - send the marker amount first, then wait for it to be written."],
+    [/NothingToReconcile/, "The vault's balance is already fully accounted for - nothing to sweep."],
     [/insufficient lamports|Attempt to debit/, "Not enough devnet SOL. Airdrop some first."],
     [/User rejected|rejected the request/i, "Rejected in the wallet."],
   ];

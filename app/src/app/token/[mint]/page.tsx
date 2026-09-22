@@ -17,6 +17,7 @@ import { duration, shortKey, sol } from "@/lib/format";
 import {
   claimIx,
   donateIx,
+  reconcileIx,
   REGISTRATION_MARKER_LAMPORTS,
   syncIx,
   writeRegistrationIx,
@@ -122,6 +123,10 @@ export default function TokenPage() {
           />
         </div>
       </div>
+
+      {token.pendingReconcileSurplus > 0 ? (
+        <ReconcileVault mint={mint} surplus={token.pendingReconcileSurplus} onDone={refresh} />
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <div className="space-y-6">
@@ -355,6 +360,59 @@ function YourRegistration({
           </p>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+function ReconcileVault({
+  mint,
+  surplus,
+  onDone,
+}: {
+  mint: string;
+  surplus: number;
+  onDone: () => void;
+}) {
+  const { publicKey } = useWallet();
+  const { send, busy, error, signature } = useSendIx();
+
+  async function onReconcile() {
+    if (!publicKey) return;
+    const sig = await send([reconcileIx({ cranker: publicKey, mint: new PublicKey(mint) })]);
+    if (sig) onDone();
+  }
+
+  return (
+    <section className="card space-y-2">
+      <h2 className="text-sm font-medium text-slate-200">Unreconciled balance detected</h2>
+      <p className="text-xs text-slate-500">
+        <span className="font-mono text-frost">{sol(surplus)}</span> is sitting in the deposit
+        vault that neither a donation nor the registration-marker bookkeeping explains — most
+        likely a plain SOL transfer sent straight to the vault outside{" "}
+        <code className="text-slate-300">donate</code>. Fully permissionless: anyone can sweep
+        it into the pool as real fee revenue.
+      </p>
+      <button className="btn-ghost" disabled={busy} onClick={onReconcile}>
+        Reconcile vault
+      </button>
+      {error ? (
+        <p className="rounded-lg border border-tax/40 bg-tax/5 px-3 py-2 text-xs text-tax">
+          {error}
+        </p>
+      ) : null}
+      {signature ? (
+        <p className="text-xs text-stack">
+          Confirmed.{" "}
+          <a
+            className="underline"
+            href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            View transaction
+          </a>
+        </p>
+      ) : null}
     </section>
   );
 }

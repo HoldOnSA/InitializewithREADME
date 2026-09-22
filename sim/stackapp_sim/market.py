@@ -18,12 +18,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List
 
+from .constants import (
+    DEPOSIT_VAULT_RENT_LAMPORTS,
+    REGISTRATION_MARKER_LAMPORTS,
+    REGISTRATION_RENT_LAMPORTS,
+)
 from .logic import (
     StackError,
     claim_is_eligible,
     collect_fee,
     refresh_weight,
     touch_registration,
+    vault_surplus,
 )
 from .state import DepositVault, LoyaltyPool, Registration, TokenConfig
 
@@ -79,6 +85,10 @@ class Market:
             config=config,
             pool=LoyaltyPool(mint=mint),
             vault=DepositVault(mint=mint),
+            # Mirrors reality: `register_mint`'s payer funds DepositVault's own
+            # rent-exemption immediately on `init`. A freshly registered token
+            # has no marker/donation money yet, so this is its whole balance.
+            vault_lamports=DEPOSIT_VAULT_RENT_LAMPORTS,
             now=now,
             slot=slot,
         )
@@ -114,15 +124,23 @@ class Market:
         """Mirrors `write_registration`: the indexer authority writes this
         after observing `wallet` send `REGISTRATION_MARKER_LAMPORTS` to
         `DepositVault`. Honor-system: nothing here checks the marker itself -
-        see `SECURITY_NOTES.md`. The marker transfer and the rent this
-        instruction spends out of `DepositVault` to create the Registration
-        PDA are both real on chain; this simulation doesn't model rent, so
-        `vault_lamports` isn't debited or credited here - only `donate` and
-        `claim` move it, which is all `assert_invariants` needs."""
+        see `SECURITY_NOTES.md`.
+
+        The marker transfer landing and the rent this instruction pays out of
+        `DepositVault` to create the Registration PDA are both real lamport
+        movements on chain, so both are modelled here: `vault_lamports` gains
+        the marker and loses the rent, and the vault's own counters track
+        both cumulatively - this is exactly what `reconcile()` needs to tell
+        "marker money not yet consumed by rent" apart from real fee revenue.
+        """
         if wallet in self.registrations:
             raise StackError("AccountAlreadyInitialized")
         r = Registration(owner=wallet, mint=self.config.mint, registered_at=self.now)
         self.registrations[wallet] = r
+        self.vault_lamports += REGISTRATION_MARKER_LAMPORTS
+        self.vault_lamports -= REGISTRATION_RENT_LAMPORTS
+        self.vault.total_marker_deposits += REGISTRATION_MARKER_LAMPORTS
+        self.vault.total_rent_spent += REGISTRATION_RENT_LAMPORTS
         self._emit("WalletRegistered", mint=self.config.mint, owner=wallet, registered_at=self.now)
         return r
 
@@ -163,6 +181,36 @@ class Market:
             total_collected=self.pool.total_collected,
             undistributed=self.pool.undistributed,
         )
+
+    def reconcile(self) -> int:
+        """Permissionless: sweep any of the vault's balance that `donate` and
+        the registration-marker bookkeeping can't already explain into the
+        pool as fee revenue - see `logic.vault_surplus`. This is what picks
+        up a plain SOL transfer landing in the vault outside of `donate`,
+        which would otherwise sit there forever, invisible to every
+        registration's reward math."""
+        surplus = vault_surplus(
+            self.vault_lamports,
+            DEPOSIT_VAULT_RENT_LAMPORTS,
+            self.vault.total_marker_deposits,
+            self.vault.total_rent_spent,
+            self.pool.total_collected,
+            self.pool.total_claimed,
+        )
+        if surplus == 0:
+            raise StackError("NothingToReconcile")
+
+        collect_fee(self.pool, surplus)
+        self._emit(
+            "FeeCollected",
+            mint=self.config.mint,
+            amount=surplus,
+            acc_reward_per_share=self.pool.acc_reward_per_share,
+            total_weighted_shares=self.pool.total_weighted_shares,
+            total_collected=self.pool.total_collected,
+            undistributed=self.pool.undistributed,
+        )
+        return surplus
 
     def claim(self, wallet: str) -> int:
         """Sync the caller's own weight, then pay out their accumulator share."""
@@ -229,3 +277,7 @@ class Market:
         )
 
         assert self.vault_lamports >= 0, f"{label}: deposit vault went negative"
+        assert self.vault_lamports >= DEPOSIT_VAULT_RENT_LAMPORTS, (
+            f"{label}: deposit vault {self.vault_lamports} fell below its own "
+            f"rent-exemption {DEPOSIT_VAULT_RENT_LAMPORTS}"
+        )

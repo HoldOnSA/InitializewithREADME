@@ -33,6 +33,15 @@ class DepositVault:
     """
 
     mint: str = ""
+    # Sum of REGISTRATION_MARKER_LAMPORTS over every write_registration ever
+    # called for this mint - a proxy for "markers received", since a marker
+    # transfer itself is invisible on chain. Together with total_rent_spent,
+    # lets `Market.reconcile()` tell "marker money not yet consumed by rent"
+    # apart from real fee revenue.
+    total_marker_deposits: int = 0
+    # Sum of the rent-exemption write_registration has ever paid out of this
+    # vault to create Registration PDAs.
+    total_rent_spent: int = 0
     bump: int = 0
 
 

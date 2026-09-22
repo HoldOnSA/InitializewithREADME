@@ -58,8 +58,15 @@ pub mod stackapp {
     }
 
     /// Permissionless: voluntarily route lamports into a token's pool. The
-    /// only source of real fee revenue - see `SECURITY_NOTES.md`.
+    /// only explicit source of fee revenue - see `SECURITY_NOTES.md`.
     pub fn donate(ctx: Context<Donate>, amount: u64) -> Result<()> {
         instructions::donate::handler(ctx, amount)
+    }
+
+    /// Permissionless: sweep any of the deposit vault's balance that
+    /// `donate` and the registration-marker bookkeeping can't already
+    /// explain into the pool as fee revenue.
+    pub fn reconcile(ctx: Context<Reconcile>) -> Result<()> {
+        instructions::reconcile::handler(ctx)
     }
 }

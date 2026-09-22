@@ -75,3 +75,44 @@ def collect_fee(pool: LoyaltyPool, amount: int) -> None:
 def claim_is_eligible(registration: Registration, current_slot: int) -> bool:
     """Whether `registration` has waited out the anti-flash-loan delay."""
     return current_slot >= registration.last_sync_slot + MIN_CLAIM_DELAY_SLOTS
+
+
+def vault_surplus(
+    actual_lamports: int,
+    own_rent_floor: int,
+    total_marker_deposits: int,
+    total_rent_spent: int,
+    total_collected: int,
+    total_claimed: int,
+) -> int:
+    """How much of a DepositVault's real lamport balance is unaccounted for by
+    anything the program already tracks - i.e. arrived as a plain SOL transfer
+    that went through neither `donate` nor the registration-marker flow.
+    Returns 0 if nothing is unaccounted for.
+
+    Three things explain a legitimate balance without it being fee revenue:
+
+    - `own_rent_floor`: the vault account's own rent-exemption. Never
+      spendable, never anyone's reward.
+    - `total_marker_deposits - total_rent_spent`: registration-marker money
+      received but not yet consumed by the rent `write_registration` pays out
+      of the vault to create each Registration PDA. `REGISTRATION_MARKER_LAMPORTS`
+      is deliberately more than one PDA's rent, so this is normally positive
+      and grows by a fixed amount per registration - the non-refundable
+      "registration cost" float, not a reward.
+    - `total_collected - total_claimed`: real lamports `donate` has already
+      moved into the vault and folded into the accumulator, minus whatever
+      `claim` has already paid back out of it. Already fee revenue, already
+      counted - not to be swept a second time.
+
+    Anything above the sum of those three is real, undeclared money sitting in
+    the vault, and `Market.reconcile()` folds it into the pool the same way
+    `donate` would. Every subtraction saturates (clamps to 0) rather than
+    going negative, mirroring Rust's `saturating_sub`: this function has no
+    side effects and must never be able to brick a permissionless crank over
+    an arithmetic edge case.
+    """
+    retained_marker_float = max(total_marker_deposits - total_rent_spent, 0)
+    backed_by_pool = max(total_collected - total_claimed, 0)
+    expected = own_rent_floor + retained_marker_float + backed_by_pool
+    return max(actual_lamports - expected, 0)

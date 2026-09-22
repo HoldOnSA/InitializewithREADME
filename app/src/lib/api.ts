@@ -29,6 +29,11 @@ export type TokenView = {
   depositVault: string;
   vaultLamports: number;
   registrationMarkerLamports: number;
+  totalMarkerDeposits: number;
+  totalRentSpent: number;
+  /** Money sitting in the vault that neither `donate` nor the marker/rent
+   * bookkeeping explains - what `reconcile` would sweep into the pool right now. */
+  pendingReconcileSurplus: number;
   pool: PoolView;
   registrationCount: number;
   pendingRegistrationCount: number;

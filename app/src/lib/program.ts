@@ -290,3 +290,19 @@ export function donateIx(params: {
     new Encoder().bytes(discriminator("donate")).u64(params.amount).finish()
   );
 }
+
+/** Permissionless: sweep any of the vault's balance that `donate` and the
+ * registration-marker bookkeeping can't already explain into the pool as
+ * fee revenue - e.g. a plain SOL transfer landing outside `donate`. */
+export function reconcileIx(params: {
+  cranker: PublicKey;
+  mint: PublicKey;
+}): TransactionInstruction {
+  const [pool] = loyaltyPoolPda(params.mint);
+  const [vault] = depositVaultPda(params.mint);
+
+  return ix(
+    [signer(params.cranker, false), ro(params.mint), rw(pool), rw(vault)],
+    new Encoder().bytes(discriminator("reconcile")).finish()
+  );
+}

@@ -7,6 +7,7 @@ pub mod events;
 pub mod instructions;
 pub mod logic;
 pub mod math;
+pub mod pumpfun;
 pub mod state;
 
 use instructions::*;
@@ -68,5 +69,17 @@ pub mod stackapp {
     /// explain into the pool as fee revenue.
     pub fn reconcile(ctx: Context<Reconcile>) -> Result<()> {
         instructions::reconcile::handler(ctx)
+    }
+
+    /// Permissionless: CPI into pump.fun's `distribute_creator_fees` to pull
+    /// `deposit_vault`'s share of a token's creator fee (once a creator has
+    /// added it as a pump.fun `SharingConfig` shareholder - see
+    /// `pumpfun.rs`), then fold it into the pool in the same transaction.
+    /// Every current shareholder must be supplied as remaining accounts, in
+    /// `SharingConfig.shareholders`'s own order.
+    pub fn pull_pump_fee<'info>(
+        ctx: Context<'_, '_, '_, 'info, PullPumpFee<'info>>,
+    ) -> Result<()> {
+        instructions::pull_pump_fee::handler(ctx)
     }
 }

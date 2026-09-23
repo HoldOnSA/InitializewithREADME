@@ -18,4 +18,10 @@ pub enum StackError {
     ZeroDonation,
     #[msg("The deposit vault's balance is already fully accounted for - nothing to sweep")]
     NothingToReconcile,
+    #[msg("The deposit vault is not present in the supplied pump.fun shareholder accounts")]
+    DepositVaultNotAShareholder,
+    #[msg("Supplied remaining accounts do not match the SharingConfig's own shareholder list, in order")]
+    ShareholderListMismatch,
+    #[msg("pump.fun's SharingConfig account data is too short or otherwise malformed")]
+    MalformedSharingConfig,
 }

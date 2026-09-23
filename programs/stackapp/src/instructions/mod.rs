@@ -1,6 +1,7 @@
 pub mod claim;
 pub mod donate;
 pub mod initialize_config;
+pub mod pull_pump_fee;
 pub mod reconcile;
 pub mod register_mint;
 pub mod sync;
@@ -10,6 +11,7 @@ pub mod write_registration;
 pub use claim::*;
 pub use donate::*;
 pub use initialize_config::*;
+pub use pull_pump_fee::*;
 pub use reconcile::*;
 pub use register_mint::*;
 pub use sync::*;

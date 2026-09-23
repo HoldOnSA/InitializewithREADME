@@ -22,6 +22,12 @@ import {
   syncIx,
   writeRegistrationIx,
 } from "@/lib/program";
+import {
+  fetchSharingConfig,
+  pullPumpFeeIx,
+  pumpFeeSetupStatus,
+  type PumpFeeSetupStatus,
+} from "@/lib/pumpfun";
 import { useSendIx } from "@/lib/useSendIx";
 import { EventLine } from "@/components/EventLine";
 import { Empty, ErrorNote, Spinner, Stat, TenureTierTable, WalletTag } from "@/components/ui";
@@ -127,6 +133,8 @@ export default function TokenPage() {
       {token.pendingReconcileSurplus > 0 ? (
         <ReconcileVault mint={mint} surplus={token.pendingReconcileSurplus} onDone={refresh} />
       ) : null}
+
+      <PumpFeePull mint={mint} depositVault={token.depositVault} onDone={refresh} />
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <div className="space-y-6">
@@ -395,6 +403,157 @@ function ReconcileVault({
       <button className="btn-ghost" disabled={busy} onClick={onReconcile}>
         Reconcile vault
       </button>
+      {error ? (
+        <p className="rounded-lg border border-tax/40 bg-tax/5 px-3 py-2 text-xs text-tax">
+          {error}
+        </p>
+      ) : null}
+      {signature ? (
+        <p className="text-xs text-stack">
+          Confirmed.{" "}
+          <a
+            className="underline"
+            href={`https://explorer.solana.com/tx/${signature}?cluster=devnet`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            View transaction
+          </a>
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * Setup flow for pulling this token's real pump.fun creator-fee share into
+ * its loyalty pool - see `lib/pumpfun.ts` for the on-chain reads this is
+ * built on.
+ *
+ * Three states, keyed off a live read of pump.fun's own `SharingConfig` for
+ * this mint (never the indexer, which knows nothing about pump.fun):
+ *   - not-configured: still open - keep polling for the creator adding
+ *     `DepositVault`.
+ *   - permanently-unavailable: `SharingConfig`'s shareholder list is
+ *     finalized (`admin_revoked`) without `DepositVault` in it - this can
+ *     never change for this token, since pump.fun only allows that list to
+ *     be set once. Stop polling; point at `donate` instead.
+ *   - ready: `DepositVault` is a real shareholder - pulls work.
+ */
+function PumpFeePull({
+  mint,
+  depositVault,
+  onDone,
+}: {
+  mint: string;
+  depositVault: string;
+  onDone: () => void;
+}) {
+  const { publicKey, connected } = useWallet();
+  const { connection } = useConnection();
+  const { send, busy, error, signature } = useSendIx();
+  const [status, setStatus] = useState<PumpFeeSetupStatus | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const mintKey = new PublicKey(mint);
+    const vaultKey = new PublicKey(depositVault);
+
+    async function check() {
+      const config = await fetchSharingConfig(connection, mintKey).catch(() => null);
+      if (cancelled) return;
+      const next = pumpFeeSetupStatus(config, vaultKey);
+      setStatus(next);
+      // A finalized (`admin_revoked`) config never changes again, in either
+      // direction - stop polling for real rather than leaving the interval
+      // running and no-opping forever for the rest of the page's lifetime.
+      if (next.state !== "not-configured") clearInterval(timer);
+    }
+
+    const timer = setInterval(check, 15_000);
+    check();
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [mint, depositVault, connection]);
+
+  async function onPull() {
+    if (!publicKey || status?.state !== "ready") return;
+    const sig = await send([
+      pullPumpFeeIx({
+        cranker: publicKey,
+        mint: new PublicKey(mint),
+        shareholders: status.shareholders.map((s) => s.address),
+      }),
+    ]);
+    if (sig) onDone();
+  }
+
+  function copyAddress() {
+    navigator.clipboard?.writeText(depositVault).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  if (!status) return null; // first read still in flight
+
+  if (status.state === "not-configured") {
+    return (
+      <section className="card space-y-2">
+        <h2 className="text-sm font-medium text-slate-200">Set up automatic pump.fun fee pulls</h2>
+        <p className="text-xs text-slate-500">
+          Not required — <code className="text-slate-300">donate</code> below always works — but
+          if this token&rsquo;s creator adds StackApp as a pump.fun Creator Fee Sharing
+          shareholder, anyone can permissionlessly pull that share straight into this pool.
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 truncate rounded-lg border border-ink-800 bg-ink-900 px-3 py-2 font-mono text-xs text-slate-300">
+            {depositVault}
+          </code>
+          <button className="btn-ghost" onClick={copyAddress}>
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          The creator adds this address via pump.fun&rsquo;s own{" "}
+          <code className="text-slate-300">update_fee_shares_v2</code> — a one-time action on
+          pump.fun&rsquo;s own side, not something StackApp initiates. Checking automatically.
+        </p>
+      </section>
+    );
+  }
+
+  if (status.state === "permanently-unavailable") {
+    return (
+      <section className="card space-y-2">
+        <h2 className="text-sm font-medium text-slate-200">Automatic pull unavailable</h2>
+        <p className="text-xs text-slate-500">
+          This token&rsquo;s pump.fun Creator Fee Sharing was finalized without StackApp as a
+          shareholder — pump.fun only allows that list to be set once, so this can&rsquo;t change
+          later for this token. <code className="text-slate-300">donate</code> below is the only
+          path for fee revenue on this token now.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card space-y-2">
+      <h2 className="text-sm font-medium text-slate-200">Pull pump.fun fees</h2>
+      <p className="text-xs text-slate-500">
+        StackApp is a confirmed shareholder on this token&rsquo;s pump.fun Creator Fee Sharing.
+        Fully permissionless — anyone can crank this whenever new fees have accrued.
+      </p>
+      {!connected ? (
+        <p className="text-xs text-slate-500">Connect a devnet wallet to pull.</p>
+      ) : (
+        <button className="btn-primary" disabled={busy} onClick={onPull}>
+          Pull fees
+        </button>
+      )}
       {error ? (
         <p className="rounded-lg border border-tax/40 bg-tax/5 px-3 py-2 text-xs text-tax">
           {error}

@@ -76,9 +76,21 @@ function explain(cause: unknown): string {
     [/UnsupportedTokenProgram/, "This mint is owned by a token program this prototype does not support."],
     [/InvalidTokenAccount/, "That token account is missing or uninitialized."],
     [/AccountAlreadyInitialized/, "This wallet is already registered for this token."],
-    [/has_one|ConstraintHasOne/, "Wrong signer - this action needs the program's current authority."],
+    [
+      /has_one|ConstraintHasOne/,
+      "Wrong signer - this action needs the program's current authority. If you're not the authority and want a token registered, open a GitHub issue on this repo.",
+    ],
     [/AccountNotInitialized/, "Not registered yet - send the marker amount first, then wait for it to be written."],
     [/NothingToReconcile/, "The vault's balance is already fully accounted for - nothing to sweep."],
+    [
+      /DepositVaultNotAShareholder/,
+      "This token's pump.fun shareholder list doesn't include StackApp - nothing to pull.",
+    ],
+    [
+      /ShareholderListMismatch/,
+      "The shareholder list doesn't match this token's real pump.fun SharingConfig - refresh and try again.",
+    ],
+    [/MalformedSharingConfig/, "pump.fun's SharingConfig for this token looks corrupted - try again shortly."],
     [/insufficient lamports|Attempt to debit/, "Not enough devnet SOL. Airdrop some first."],
     [/User rejected|rejected the request/i, "Rejected in the wallet."],
   ];

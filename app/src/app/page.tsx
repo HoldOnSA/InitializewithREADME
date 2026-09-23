@@ -10,6 +10,8 @@ import { api, type TokenView } from "@/lib/api";
 import { duration, isValidBase58Key, sol } from "@/lib/format";
 import { registerMintIx } from "@/lib/program";
 import { useSendIx } from "@/lib/useSendIx";
+import { ClaimTicker } from "@/components/ClaimTicker";
+import { Gem } from "@/components/Gem";
 import { Empty, ErrorNote, Spinner, Stat } from "@/components/ui";
 
 export default function HomePage() {
@@ -29,7 +31,19 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3">
+      <section className="relative space-y-3">
+        {/* Behind the heading, right side - scoped to this section's own
+            stacking context, not the page-level ambient glow in
+            globals.css (that stays exactly as-is on `body`). */}
+        <div
+          className="pointer-events-none absolute -right-6 -top-10 -z-10 opacity-40"
+          aria-hidden="true"
+        >
+          <Gem className="h-56 w-56 animate-float" glow />
+        </div>
+
+        <ClaimTicker />
+
         <h1 className="text-hero font-bold text-white">
           A loyalty layer on top of real <span className="lit">pump.fun tokens</span>
         </h1>
@@ -125,7 +139,7 @@ function RegisterToken() {
   }
 
   return (
-    <section id="register" className="card space-y-3">
+    <section id="register" className="card scroll-mt-20 space-y-3 lg:scroll-mt-0">
       <h2 className="text-sm font-medium text-slate-200">Register a pump.fun token</h2>
       <p className="text-xs text-slate-500">
         Authority-gated on chain: this only actually succeeds if the wallet you sign with is

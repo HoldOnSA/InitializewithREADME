@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
-import { DevnetBanner, Footer, Nav } from "@/components/Chrome";
+import { DevnetBanner, Footer, Sidebar } from "@/components/Chrome";
 
 export const metadata: Metadata = {
   title: "StackApp — pump.fun loyalty layer (devnet)",
@@ -15,9 +15,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Providers>
           <DevnetBanner />
-          <Nav />
-          <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
-          <Footer />
+          <div className="lg:flex">
+            <Sidebar />
+            <div className="min-w-0 flex-1">
+              <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
+              <Footer />
+            </div>
+          </div>
         </Providers>
       </body>
     </html>

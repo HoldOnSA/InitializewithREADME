@@ -91,6 +91,20 @@ h3 {
   }
 }
 
+/* Matched from the mockup's own global rule - added alongside the new
+   hero float animation so a new animation never ships without this,
+   but it also covers every existing transition/animation in this file
+   (hover-lift, card transition, spinner) site-wide. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
 /* The wallet-adapter modal ships its own styles; nudge them to match. */
 .wallet-adapter-button-trigger {
   background-color: #35e5ff !important;

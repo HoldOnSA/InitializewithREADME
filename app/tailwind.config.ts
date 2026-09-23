@@ -41,6 +41,17 @@ const config: Config = {
         hero: ["clamp(2rem, 5vw, 3.25rem)", { lineHeight: "1.05", letterSpacing: "-0.028em" }],
         section: ["clamp(1.25rem, 2.4vw, 1.625rem)", { lineHeight: "1.15", letterSpacing: "-0.012em" }],
       },
+      // The hero gem's idle float, matched from the mockup's `@keyframes
+      // float`. `prefers-reduced-motion` handling lives in globals.css.
+      keyframes: {
+        float: {
+          "0%, 100%": { transform: "translateY(-8px)" },
+          "50%": { transform: "translateY(8px)" },
+        },
+      },
+      animation: {
+        float: "float 9s ease-in-out infinite",
+      },
     },
   },
   plugins: [],

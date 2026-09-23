@@ -35,7 +35,7 @@ h3 {
 
 @layer components {
   .card {
-    @apply rounded-2xl border border-ink-700 bg-ink-800/70 p-5 backdrop-blur;
+    @apply rounded-2xl border border-ink-700 bg-ink-800/70 p-5 backdrop-blur transition;
   }
 
   .label {
@@ -43,7 +43,29 @@ h3 {
   }
 
   .stat {
-    @apply font-mono text-lg text-frost;
+    @apply font-mono text-lg text-frost tabular-nums;
+  }
+
+  /* Gradient-clip glow treatment for an emphasized headline phrase -
+     matched from the mockup's `.lit` (`h1 .lit`). Visual only: wraps
+     whatever text is already there, adds no copy. */
+  .lit {
+    background: linear-gradient(180deg, #eafbff, theme("colors.stack.DEFAULT") 62%, theme("colors.stack.dim"));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 26px rgba(53, 229, 255, 0.32));
+  }
+
+  /* The mockup's "hairline" stat-strip pattern (`.strip`/`.rules`): a
+     colored 1px gap between cells, via a colored wrapper background
+     showing through a `gap-px` grid. */
+  .hairline-grid {
+    @apply grid gap-px overflow-hidden rounded-2xl border border-ink-700 bg-ink-700;
+  }
+
+  .hairline-cell {
+    @apply bg-ink-800 p-5;
   }
 
   .btn {

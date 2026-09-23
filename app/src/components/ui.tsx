@@ -23,7 +23,7 @@ export function Stat({
   return (
     <div>
       <div className="label">{label}</div>
-      <div className={`font-mono text-lg ${toneClass}`}>{value}</div>
+      <div className={`font-mono text-lg tabular-nums ${toneClass}`}>{value}</div>
       {hint ? <div className="mt-0.5 text-xs text-slate-500">{hint}</div> : null}
     </div>
   );
@@ -76,7 +76,7 @@ export function TenureTierTable() {
         {rows.map((row, i) => (
           <tr key={row.held} className="border-t border-ink-800">
             <td className="py-1">{i === 0 ? "less than 1 minute" : duration(row.held)}</td>
-            <td className="py-1 text-right text-stack">{(row.mult / 10_000).toFixed(2)}×</td>
+            <td className="py-1 text-right tabular-nums text-stack">{(row.mult / 10_000).toFixed(2)}×</td>
           </tr>
         ))}
       </tbody>

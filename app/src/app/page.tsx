@@ -30,8 +30,8 @@ export default function HomePage() {
   return (
     <div className="space-y-8">
       <section className="space-y-3">
-        <h1 className="text-2xl font-semibold tracking-tight text-white">
-          A loyalty layer on top of real pump.fun tokens
+        <h1 className="text-hero font-bold text-white">
+          A loyalty layer on top of real <span className="lit">pump.fun tokens</span>
         </h1>
         <p className="max-w-3xl text-sm leading-relaxed text-slate-400">
           Trades happen on pump.fun&rsquo;s own program against real, transferable SPL tokens —
@@ -67,7 +67,7 @@ export default function HomePage() {
             <Link
               key={token.mint}
               href={`/token/${token.mint}`}
-              className="card transition hover:border-stack/50"
+              className="card hover:-translate-y-0.5 hover:border-stack/50"
             >
               <div className="flex items-baseline justify-between">
                 <span className="font-mono text-sm text-stack">

@@ -32,6 +32,15 @@ const config: Config = {
         body: ["DM Sans", "ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
         mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
+      // Heading scale matched from the mockup's h1/h2, `hero` scaled down
+      // from its literal clamp(38px,6.2vw,70px) - this app is a dense token
+      // dashboard, not a marketing landing page, so the full mockup size
+      // would dominate the page above a data grid. `section` is unchanged
+      // from the mockup's own h2 scale.
+      fontSize: {
+        hero: ["clamp(2rem, 5vw, 3.25rem)", { lineHeight: "1.05", letterSpacing: "-0.028em" }],
+        section: ["clamp(1.25rem, 2.4vw, 1.625rem)", { lineHeight: "1.15", letterSpacing: "-0.012em" }],
+      },
     },
   },
   plugins: [],

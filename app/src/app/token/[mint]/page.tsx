@@ -96,8 +96,8 @@ export default function TokenPage() {
         </a>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <div className="card">
+      <div className="hairline-grid grid-cols-2 md:grid-cols-4">
+        <div className="hairline-cell">
           <Stat
             label="Registrations"
             value={token.registrationCount}
@@ -106,14 +106,14 @@ export default function TokenPage() {
             }
           />
         </div>
-        <div className="card">
+        <div className="hairline-cell">
           <Stat
             label="Deposit vault"
             value={sol(token.vaultLamports)}
             hint="markers + donations, minus payouts"
           />
         </div>
-        <div className="card">
+        <div className="hairline-cell">
           <Stat
             label="Loyalty pool"
             value={sol(token.pool.outstanding)}
@@ -121,7 +121,7 @@ export default function TokenPage() {
             hint={`${sol(token.pool.totalCollected)} donated all time`}
           />
         </div>
-        <div className="card">
+        <div className="hairline-cell">
           <Stat
             label="Marker amount"
             value={sol(token.registrationMarkerLamports)}
@@ -191,7 +191,7 @@ function Row({ label, value, hint }: { label: string; value: string; hint?: stri
       <dt className="text-slate-500" title={hint}>
         {label}
       </dt>
-      <dd className="font-mono text-slate-300">{value}</dd>
+      <dd className="font-mono tabular-nums text-slate-300">{value}</dd>
     </div>
   );
 }

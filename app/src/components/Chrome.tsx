@@ -31,7 +31,7 @@ export function Nav() {
     <header className="sticky top-0 z-30 border-b border-ink-700 bg-ink-950/80 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
         <Link href="/" className="flex items-center gap-2 font-display font-bold tracking-tight text-frost">
-          <span className="grid h-7 w-7 place-items-center rounded-md2 bg-stack text-sm font-bold text-ink-950">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-stack text-sm font-bold text-ink-950">
             S
           </span>
           <span>StackApp</span>

@@ -14,6 +14,23 @@ const WalletMultiButton = dynamic(
   { ssr: false, loading: () => <div className="h-9 w-36 animate-pulse rounded-lg bg-ink-700" /> }
 );
 
+const ICONS = {
+  home: (
+    <>
+      <path d="M4 11.5 12 4l8 7.5" />
+      <path d="M6 10v9h12v-9" />
+      <path d="M10 19v-5h4v5" />
+    </>
+  ),
+  feed: <path d="M3 12h4l2.5-6 3 12 2.5-6H21" />,
+  register: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 9v6M9 12h6" />
+    </>
+  ),
+};
+
 // Real destinations only - see the sidebar-nav plan discussion for why
 // the mockup's Explore/Passport/Curve Lab/Docs items aren't here: none
 // of them correspond to a page or anchor that actually exists in the V2
@@ -21,9 +38,9 @@ const WalletMultiButton = dynamic(
 // homepage, not a "Launch" flow - V2 doesn't create tokens, only tracks
 // pump.fun ones that already exist.
 const NAV = [
-  { href: "/", label: "Home" },
-  { href: "/feed", label: "Feed" },
-  { href: "/#register", label: "Register" },
+  { href: "/", label: "Home", icon: ICONS.home },
+  { href: "/feed", label: "Feed", icon: ICONS.feed },
+  { href: "/#register", label: "Register", icon: ICONS.register },
 ];
 
 export function DevnetBanner() {
@@ -41,7 +58,7 @@ const Logo = ({ onClick }: { onClick?: () => void }) => (
     onClick={onClick}
     className="flex items-center gap-2 font-display font-bold tracking-tight text-frost"
   >
-    <span className="grid h-7 w-7 place-items-center rounded-lg bg-stack text-sm font-bold text-ink-950">
+    <span className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-stack to-pool text-sm font-bold text-ink-950">
       S
     </span>
     <span>StackApp</span>
@@ -120,20 +137,41 @@ export function Sidebar() {
         </div>
 
         <nav className="flex flex-col gap-1">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={close}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                isActive(item.href)
-                  ? "bg-ink-700 text-frost"
-                  : "text-slate-400 hover:bg-ink-800 hover:text-frost"
-              }`}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {NAV.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={close}
+                className={`relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  active
+                    ? "bg-ink-700 text-frost"
+                    : "text-slate-400 hover:bg-ink-800 hover:text-frost"
+                }`}
+              >
+                {active ? (
+                  <span
+                    className="absolute -left-1 h-5 w-[3px] rounded-r-full bg-stack"
+                    aria-hidden="true"
+                  />
+                ) : null}
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-[18px] w-[18px] shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {item.icon}
+                </svg>
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="mt-auto flex items-center gap-2 border-t border-ink-800 pt-4">
@@ -143,7 +181,7 @@ export function Sidebar() {
             <p className="truncate text-[11px] text-slate-500">devnet prototype</p>
           </div>
         </div>
-        <div className="mt-3 hidden lg:block">
+        <div className="mt-3 hidden rounded-xl border border-ink-800 bg-ink-950/40 p-2 lg:block">
           <WalletMultiButton />
         </div>
       </aside>

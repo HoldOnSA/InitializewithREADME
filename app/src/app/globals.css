@@ -68,13 +68,28 @@ h3 {
     @apply bg-ink-800 p-5;
   }
 
+  /* Two independent transitions, not one shared one - Tailwind's plain
+     `transition` utility bundles `transform` into the same duration/curve
+     as color/shadow, which is exactly why the active:scale-95 press
+     effect felt as slow as the 200ms hover curve. Hover-triggered
+     properties (background/border/color/shadow) keep the mockup's own
+     splitbar "back-out" curve; `transform` - the only thing active:scale-95
+     touches - gets its own fast, near-instant timing, independent of it. */
   .btn {
-    @apply rounded-full px-5 py-2.5 text-sm font-medium transition
+    @apply rounded-full px-5 py-2.5 text-sm font-medium active:scale-95
            disabled:cursor-not-allowed disabled:opacity-40;
+    transition:
+      background-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 75ms ease-out;
   }
 
   .btn-primary {
-    @apply btn bg-stack font-bold text-ink-950 hover:bg-[#5ceeff];
+    @apply btn bg-stack font-bold text-ink-950 hover:bg-[#5ceeff]
+           hover:shadow-[0_0_20px_rgba(53,229,255,0.35)];
   }
 
   .btn-ghost {
@@ -88,6 +103,16 @@ h3 {
 
   .pill {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium;
+  }
+
+  /* A second, slower-drifting glow layer, scoped to the homepage hero
+     only - not the page-level ambient glow on `body` (untouched) and
+     not sitewide (so /feed and /token/[mint] stay exactly as calm as
+     they already are). Cheap: a single `transform`-animated gradient,
+     no JS, GPU-accelerated, covered by the reduced-motion rule below. */
+  .hero-drift {
+    @apply animate-drift;
+    background: radial-gradient(34rem 26rem at 22% 30%, rgba(29, 111, 224, 0.16), transparent 65%);
   }
 }
 

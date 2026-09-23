@@ -31,35 +31,57 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
-      <section className="relative space-y-3">
-        {/* Behind the heading, right side - scoped to this section's own
-            stacking context, not the page-level ambient glow in
-            globals.css (that stays exactly as-is on `body`). */}
+      <section className="relative space-y-4 py-6 text-center">
+        {/* Second ambient glow layer, scoped to just this hero - the
+            page-level glow on `body` (globals.css) is untouched, and this
+            doesn't bleed into /feed or /token/[mint]. */}
+        <div className="hero-drift pointer-events-none absolute inset-0 -z-20" aria-hidden="true" />
+
+        {/* The gem, centered and responsive (clamp, not a flat size) -
+            vertically anchored so its busiest, brightest region (the
+            horizontal cross-bar) sits above the heading rather than
+            directly behind it; the heading instead overlaps the gem's
+            lower half, which narrows to a single point and is visually
+            much calmer. */}
         <div
-          className="pointer-events-none absolute -right-6 -top-10 -z-10 opacity-40"
+          className="pointer-events-none absolute left-1/2 -top-16 -z-10 -translate-x-1/2 opacity-60"
           aria-hidden="true"
         >
-          <Gem className="h-56 w-56 animate-float" glow />
+          <Gem
+            className="h-[clamp(8rem,26vw,22rem)] w-[clamp(8rem,26vw,22rem)] animate-float"
+            glow
+          />
         </div>
 
-        <ClaimTicker />
+        <div className="relative mx-auto max-w-3xl">
+          {/* Defensive scrim behind just the text block - guarantees
+              legibility regardless of exactly how the gem's shape lines
+              up at any given breakpoint, rather than relying on the
+              positioning above alone. */}
+          <div
+            className="pointer-events-none absolute -z-[5] inset-0 bg-[radial-gradient(ellipse_70%_65%_at_50%_40%,rgba(3,7,12,0.6),transparent_75%)]"
+            aria-hidden="true"
+          />
 
-        <h1 className="text-hero font-bold text-white">
-          A loyalty layer on top of real <span className="lit">pump.fun tokens</span>
-        </h1>
-        <p className="max-w-3xl text-sm leading-relaxed text-slate-400">
-          Trades happen on pump.fun&rsquo;s own program against real, transferable SPL tokens —
-          StackApp never touches them. Register a wallet by sending a small, fixed marker
-          amount of SOL to a token&rsquo;s deposit address; your weight is your{" "}
-          <em className="text-slate-300">live</em> balance × how long you&rsquo;ve held it,
-          re-read from chain every time you sync or claim. No wallet ever earns a per-wallet
-          bonus for splitting a position, and no balance increase pays out until a few slots
-          have passed.
-        </p>
-        <div className="flex flex-wrap gap-2 text-xs">
-          <Link href="/feed" className="btn-ghost">
-            Watch the live feed
-          </Link>
+          <ClaimTicker />
+
+          <h1 className="mt-3 text-hero font-bold text-white">
+            A loyalty layer on top of real <span className="lit">pump.fun tokens</span>
+          </h1>
+          <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-400">
+            Trades happen on pump.fun&rsquo;s own program against real, transferable SPL tokens —
+            StackApp never touches them. Register a wallet by sending a small, fixed marker
+            amount of SOL to a token&rsquo;s deposit address; your weight is your{" "}
+            <em className="text-slate-300">live</em> balance × how long you&rsquo;ve held it,
+            re-read from chain every time you sync or claim. No wallet ever earns a per-wallet
+            bonus for splitting a position, and no balance increase pays out until a few slots
+            have passed.
+          </p>
+          <div className="mt-4 flex flex-wrap justify-center gap-2 text-xs">
+            <Link href="/feed" className="btn-ghost">
+              Watch the live feed
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -114,8 +136,52 @@ export default function HomePage() {
         </div>
       </section>
 
+      <HowItWorks />
+
       <RegisterToken />
     </div>
+  );
+}
+
+function HowItWorks() {
+  const steps = [
+    {
+      n: "01",
+      title: "A token gets tracked, not created",
+      body: "StackApp registers a real, already-existing pump.fun token — every trade still happens on pump.fun’s own program, against real, transferable SPL tokens. StackApp never touches them.",
+    },
+    {
+      n: "02",
+      title: "You register by sending SOL",
+      body: "A small, fixed marker amount, sent straight to that token’s deposit address — a plain transfer, no program interaction required.",
+    },
+    {
+      n: "03",
+      title: "Your weight is live balance × time",
+      body: "Every sync or claim re-reads your real on-chain balance and multiplies it by how long you’ve continuously held it. Nothing is cached, nothing pays out on a snapshot.",
+    },
+    {
+      n: "04",
+      title: "Claim your share, anytime",
+      body: "Fees arrive by direct donation or a permissionless pump.fun pull. Your claim pays your weight’s share of everything collected, in SOL, after a short delay past any balance increase.",
+    },
+  ];
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium uppercase tracking-wider text-slate-500">
+        How it works
+      </h2>
+      <div className="hairline-grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+        {steps.map((step) => (
+          <div key={step.n} className="hairline-cell space-y-2">
+            <span className="font-mono text-xs text-stack">{step.n}</span>
+            <p className="text-sm font-medium text-frost">{step.title}</p>
+            <p className="text-xs leading-relaxed text-slate-500">{step.body}</p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

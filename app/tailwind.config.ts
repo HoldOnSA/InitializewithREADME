@@ -43,14 +43,22 @@ const config: Config = {
       },
       // The hero gem's idle float, matched from the mockup's `@keyframes
       // float`. `prefers-reduced-motion` handling lives in globals.css.
+      // `drift` is this pass's own addition (not from the mockup) for the
+      // hero's second ambient glow layer - a slow, subtle translate+scale,
+      // not the float's up-down bob.
       keyframes: {
         float: {
           "0%, 100%": { transform: "translateY(-8px)" },
           "50%": { transform: "translateY(8px)" },
         },
+        drift: {
+          "0%, 100%": { transform: "translate(0, 0) scale(1)" },
+          "50%": { transform: "translate(2%, -3%) scale(1.05)" },
+        },
       },
       animation: {
         float: "float 9s ease-in-out infinite",
+        drift: "drift 24s ease-in-out infinite",
       },
     },
   },

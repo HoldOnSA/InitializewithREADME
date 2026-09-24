@@ -34,8 +34,12 @@ h3 {
 }
 
 @layer components {
+  /* Flat, solid card - no backdrop-blur "frosted glass" atmosphere.
+     Same border/background tokens as before, just without the blur that
+     was doing most of the work making this feel atmospheric rather than
+     flat. */
   .card {
-    @apply rounded-2xl border border-ink-700 bg-ink-800/70 p-5 backdrop-blur transition;
+    @apply rounded-2xl border border-ink-700 bg-ink-800 p-5 transition;
   }
 
   .label {
@@ -43,18 +47,20 @@ h3 {
   }
 
   .stat {
-    @apply font-mono text-lg text-frost tabular-nums;
+    @apply font-mono text-lg font-semibold text-frost tabular-nums;
   }
 
   /* Gradient-clip glow treatment for an emphasized headline phrase -
      matched from the mockup's `.lit` (`h1 .lit`). Visual only: wraps
-     whatever text is already there, adds no copy. */
+     whatever text is already there, adds no copy. Same three stops/colors
+     as before - only the drop-shadow's size/opacity was dialed back, to
+     keep this legible as bold flat type rather than a glowing readout. */
   .lit {
     background: linear-gradient(180deg, #eafbff, theme("colors.stack.DEFAULT") 62%, theme("colors.stack.dim"));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    filter: drop-shadow(0 0 26px rgba(53, 229, 255, 0.32));
+    filter: drop-shadow(0 0 10px rgba(53, 229, 255, 0.16));
   }
 
   /* The mockup's "hairline" stat-strip pattern (`.strip`/`.rules`): a
@@ -89,7 +95,7 @@ h3 {
 
   .btn-primary {
     @apply btn bg-stack font-bold text-ink-950 hover:bg-[#5ceeff]
-           hover:shadow-[0_0_20px_rgba(53,229,255,0.35)];
+           hover:shadow-[0_0_6px_rgba(53,229,255,0.15)];
   }
 
   .btn-ghost {
@@ -109,10 +115,12 @@ h3 {
      only - not the page-level ambient glow on `body` (untouched) and
      not sitewide (so /feed and /token/[mint] stay exactly as calm as
      they already are). Cheap: a single `transform`-animated gradient,
-     no JS, GPU-accelerated, covered by the reduced-motion rule below. */
+     no JS, GPU-accelerated, covered by the reduced-motion rule below.
+     Same pool-blue token as before, dialed down to a faint wash rather
+     than a visible glow layer. */
   .hero-drift {
     @apply animate-drift;
-    background: radial-gradient(34rem 26rem at 22% 30%, rgba(29, 111, 224, 0.16), transparent 65%);
+    background: radial-gradient(34rem 26rem at 22% 30%, rgba(29, 111, 224, 0.06), transparent 65%);
   }
 }
 

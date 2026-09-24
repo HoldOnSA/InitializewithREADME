@@ -28,8 +28,8 @@ export function Gem({
           <stop offset="100%" stopColor="#1d6fe0" />
         </linearGradient>
         {glow ? (
-          <filter id={filterId} x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="5" result="b" />
+          <filter id={filterId} x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2" result="b" />
             <feMerge>
               <feMergeNode in="b" />
               <feMergeNode in="SourceGraphic" />

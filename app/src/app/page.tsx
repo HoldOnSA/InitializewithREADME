@@ -44,7 +44,7 @@ export default function HomePage() {
             lower half, which narrows to a single point and is visually
             much calmer. */}
         <div
-          className="pointer-events-none absolute left-1/2 -top-16 -z-10 -translate-x-1/2 opacity-60"
+          className="pointer-events-none absolute left-1/2 -top-16 -z-10 -translate-x-1/2 opacity-30"
           aria-hidden="true"
         >
           <Gem
